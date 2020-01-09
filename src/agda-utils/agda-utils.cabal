@@ -9,6 +9,23 @@ version:             0.1.0.0
 build-type:          Simple
 extra-source-files:  CHANGELOG.md
 
+flag cpphs
+  default:     False
+  manual:      True
+  description: Use cpphs instead of cpp.
+
+flag debug
+  default: False
+  manual: True
+  description:
+    Enable debugging features that may slow Agda down.
+
+flag enable-cluster-counting
+  default: False
+  description:
+    Enable the --count-clusters flag. (If enable-cluster-counting is
+    False, then the --count-clusters flag triggers an error message.)
+
 library
   hs-source-dirs: src
   build-depends:  array >= 0.5.1.1 && < 0.6
