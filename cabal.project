@@ -1,3 +1,9 @@
 packages:
   src/agda-utils
   ./
+
+package agda-utils
+  optimization: True
+
+package agda
+  optimization: False
