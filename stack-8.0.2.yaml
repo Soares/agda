@@ -9,5 +9,6 @@ extra-deps:
 # Local packages, usually specified by relative directory name
 packages:
 - '.'
+- 'src/agda-utils'
 - 'src/fix-agda-whitespace'
 - 'src/size-solver'
