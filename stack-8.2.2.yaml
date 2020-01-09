@@ -7,3 +7,4 @@ extra-deps:
 - text-1.2.3.1
 packages:
   - 'src/agda-utils'
+  - '.'

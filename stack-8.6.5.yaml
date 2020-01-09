@@ -9,3 +9,4 @@ extra-deps:
 - STMonadTrans-0.4.3
 packages:
 - 'src/agda-utils'
+- '.'

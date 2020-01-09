@@ -50,6 +50,34 @@ library
   if impl(ghc < 8.4)
     build-depends: transformers == 0.5.2.0
 
+  if flag(cpphs)
+    -- We don't write an upper bound for cpphs because the
+    -- `build-tools` field can not be modified in Hackage.
+
+    -- If your change the lower bound of cpphs also change it in the
+    -- `.travis.yml` file [Issue #2315].
+    build-tools: cpphs >= 1.20.8
+    ghc-options: -pgmP cpphs -optP --cpp
+
+  if flag(debug)
+    cpp-options:    -DDEBUG
+
+  if flag(enable-cluster-counting)
+    cpp-options:    -DCOUNT_CLUSTERS
+    build-depends:  text-icu == 0.7.*
+
+  if os(windows)
+    build-depends:  Win32 >= 2.3.1.1 && < 2.7
+
+  -- Agda cannot be built with GHC 8.6.1 due to a compiler bug, see
+  -- Agda Issue #3344.
+  if impl(ghc == 8.6.1)
+    buildable: False
+
+  -- Agda cannot be built with Windows and GHC 8.6.3 due to a compiler
+  -- bug, see Agda Issue #3657.
+  if os(windows) && impl(ghc == 8.6.3)
+    buildable: False
 
   exposed-modules:
                     Agda.Interaction.Library.Base
