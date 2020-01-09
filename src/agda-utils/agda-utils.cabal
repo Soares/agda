@@ -7,7 +7,6 @@ version:             0.1.0.0
 -- bug-reports:
 -- license:
 build-type:          Simple
-extra-source-files:  CHANGELOG.md
 
 flag cpphs
   default:     False
