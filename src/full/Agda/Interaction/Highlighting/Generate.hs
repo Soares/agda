@@ -65,7 +65,7 @@ import qualified Agda.Syntax.Literal as L
 import qualified Agda.Syntax.Parser as Pa
 import qualified Agda.Syntax.Parser.Tokens as T
 import qualified Agda.Syntax.Position as P
-import Agda.Syntax.Position (Range, getRange, noRange)
+import Agda.Syntax.Position (Range, HasRange, getRange, noRange)
 
 import Agda.Utils.FileName
 import Agda.Utils.Function
@@ -180,8 +180,11 @@ generateAndPrintSyntaxInfo decl hlLevel updateState = do
 
     let nameInfo = mconcat $ map (generate modMap file kinds) names
 
-    -- Constructors are only highlighted after type checking, since they
-    -- can be overloaded.
+    -- After the code has been type checked more information may be
+    -- available for overloaded constructors, and
+    -- generateConstructorInfo takes advantage of this information.
+    -- Note, however, that highlighting for overloaded constructors is
+    -- included also in nameInfo.
     constructorInfo <- case hlLevel of
       Full{} -> generateConstructorInfo modMap file kinds decl
       _      -> return mempty
@@ -229,7 +232,8 @@ generateAndPrintSyntaxInfo decl hlLevel updateState = do
     universeBi decl
 
   -- Bound variables, dotted patterns, record fields, module names,
-  -- the "as" and "to" symbols.
+  -- the "as" and "to" symbols and some other things.
+  theRest :: SourceToModule -> AbsolutePath -> File
   theRest modMap file = mconcat
     [ Fold.foldMap getFieldDecl   $ universeBi decl
     , Fold.foldMap getVarAndField $ universeBi decl
@@ -247,6 +251,7 @@ generateAndPrintSyntaxInfo decl hlLevel updateState = do
     , Fold.foldMap getNamedArgB   $ universeBi decl
     , Fold.foldMap getNamedArgL   $ universeBi decl
     , Fold.foldMap getQuantityAttr$ universeBi decl
+    , Fold.foldMap getPragma      $ universeBi decl
     ]
     where
     bound A.BindName{ unBind = n } =
@@ -336,6 +341,26 @@ generateAndPrintSyntaxInfo decl hlLevel updateState = do
     getPatSynArgs :: A.Declaration -> File
     getPatSynArgs (A.PatternSynDef _ xs _) = mconcat $ map (bound . A.mkBindName . Common.unArg) xs
     getPatSynArgs _                        = mempty
+
+    -- Issue #4361, highlight BUILTINs like NAT, EQUALITY etc. in keyword color.
+    getPragma :: A.Declaration -> File
+    getPragma = \case
+      A.Pragma _ p ->
+        case p of
+          A.BuiltinPragma b _      -> keyword b
+          A.BuiltinNoDefPragma b _ -> keyword b
+          A.CompilePragma b _ _    -> keyword b
+          A.RewritePragma r _      -> keyword r
+          A.OptionsPragma{}   -> mempty
+          A.StaticPragma{}    -> mempty
+          A.EtaPragma{}       -> mempty
+          A.InjectivePragma{} -> mempty
+          A.InlinePragma{}    -> mempty
+          A.DisplayPragma{}   -> mempty
+      _ -> mempty
+
+    keyword :: HasRange a => a -> File
+    keyword x = singleton (rToR $ getRange x) $ parserBased { aspect = Just Keyword }
 
     getPattern' :: IsProjP e => A.Pattern' e -> File
     getPattern' (A.VarP x)    = bound x
@@ -447,6 +472,7 @@ tokenHighlighting = merge . map tokenToCFile
   tokenToCFile (T.TokKeyword T.KwSet  i)        = aToF PrimitiveType (getRange i)
   tokenToCFile (T.TokKeyword T.KwProp i)        = aToF PrimitiveType (getRange i)
   tokenToCFile (T.TokKeyword T.KwForall i)      = aToF Symbol (getRange i)
+  tokenToCFile (T.TokKeyword T.KwREWRITE _)     = mempty  -- #4361, REWRITE is not always a Keyword
   tokenToCFile (T.TokKeyword _ i)               = aToF Keyword (getRange i)
   tokenToCFile (T.TokSymbol  _ i)               = aToF Symbol (getRange i)
   tokenToCFile (T.TokLiteral (L.LitNat    r _)) = aToF Number r
@@ -941,20 +967,32 @@ nameToFileA modMap file x include m =
              file
              (concreteQualifier x)
              (concreteBase x)
-             r
+             rangeOfFixityDeclaration
              m
              (if include then Just $ bindingSite x else Nothing)
     `mappend` notationFile
   where
-    -- Andreas, 2016-09-08, for issue #2140:
-    -- Range of name from fixity declaration:
-    fr = theNameRange $ A.nameFixity $ A.qnameName x
-    -- Somehow we import fixity ranges from other files, we should ignore them.
-    -- (I do not understand how we get them as they should not be serialized...)
-    r = if P.rangeFile fr == Strict.Just file then fr else noRange
+  -- TODO: Currently we highlight fixity and syntax declarations by
+  -- producing highlighting something like once per occurrence of the
+  -- related name(s) in the file of the declaration (and we explicitly
+  -- avoid doing this for other files). Perhaps it would be better to
+  -- only produce this highlighting once.
 
-    notationFile = mconcat $ map genPartFile $ theNotation $ A.nameFixity $ A.qnameName x
+  rangeOfFixityDeclaration =
+    if P.rangeFile r == Strict.Just file
+    then r else noRange
+    where
+    r = theNameRange $ A.nameFixity $ A.qnameName x
+
+  notationFile =
+    if P.rangeFile (getRange notation) == Strict.Just file
+    then mconcat $ map genPartFile notation
+    else mempty
+    where
+    notation = theNotation $ A.nameFixity $ A.qnameName x
+
     boundAspect = parserBased{ aspect = Just $ Name (Just Bound) False }
+
     genPartFile (BindHole r i)   = several [rToR r, rToR $ getRange i] boundAspect
     genPartFile (NormalHole r i) = several [rToR r, rToR $ getRange i] boundAspect
     genPartFile WildHole{}       = mempty

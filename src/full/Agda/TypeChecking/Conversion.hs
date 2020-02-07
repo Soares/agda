@@ -380,7 +380,7 @@ compareTel t1 t2 cmp tel1 tel2 =
     (EmptyTel, _)        -> bad
     (_, EmptyTel)        -> bad
     (ExtendTel dom1{-@(Dom i1 a1)-} tel1, ExtendTel dom2{-@(Dom i2 a2)-} tel2) -> do
-      compareDom cmp dom1 dom2 tel1 tel2 bad bad bad $
+      compareDom cmp dom1 dom2 tel1 tel2 bad bad bad bad $
         compareTel t1 t2 cmp (absBody tel1) (absBody tel2)
   where
     -- Andreas, 2011-05-10 better report message about types
@@ -669,12 +669,13 @@ compareAtom cmp t m n =
                 [ "t1 =" <+> prettyTCM t1
                 , "t2 =" <+> prettyTCM t2
                 ]
-              compareDom cmp dom2 dom1 b1 b2 errH errR errQ $
+              compareDom cmp dom2 dom1 b1 b2 errH errR errQ errC $
                 compareType cmp (absBody b1) (absBody b2)
             where
             errH = typeError $ UnequalHiding t1 t2
             errR = typeError $ UnequalRelevance cmp t1 t2
             errQ = typeError $ UnequalQuantity  cmp t1 t2
+            errC = typeError $ UnequalCohesion cmp t1 t2
           _ -> __IMPOSSIBLE__
 
 -- | Check whether @a1 `cmp` a2@ and continue in context extended by @a1@.
@@ -687,15 +688,17 @@ compareDom :: (MonadConversion m , Free c)
   -> m ()     -- ^ Continuation if mismatch in 'Hiding'.
   -> m ()     -- ^ Continuation if mismatch in 'Relevance'.
   -> m ()     -- ^ Continuation if mismatch in 'Quantity'.
+  -> m ()     -- ^ Continuation if mismatch in 'Cohesion'.
   -> m ()     -- ^ Continuation if comparison is successful.
   -> m ()
 compareDom cmp
   dom1@(Dom{domInfo = i1, unDom = a1})
   dom2@(Dom{domInfo = i2, unDom = a2})
-  b1 b2 errH errR errQ cont
+  b1 b2 errH errR errQ errC cont
   | not $ sameHiding dom1 dom2 = errH
   | not $ compareRelevance cmp (getRelevance dom1) (getRelevance dom2) = errR
   | not $ compareQuantity  cmp (getQuantity  dom1) (getQuantity  dom2) = errQ
+  | not $ compareCohesion  cmp (getCohesion  dom1) (getCohesion  dom2) = errC
   | otherwise = do
       let r = max (getRelevance dom1) (getRelevance dom2)
               -- take "most irrelevant"
@@ -721,6 +724,10 @@ compareRelevance CmpLeq = (<=)
 compareQuantity :: Comparison -> Quantity -> Quantity -> Bool
 compareQuantity CmpEq  = sameQuantity
 compareQuantity CmpLeq = moreQuantity
+
+compareCohesion :: Comparison -> Cohesion -> Cohesion -> Bool
+compareCohesion CmpEq  = sameCohesion
+compareCohesion CmpLeq = moreCohesion
 
 -- | When comparing argument spines (in compareElims) where the first arguments
 --   don't match, we keep going, substituting the anti-unification of the two
@@ -782,9 +789,12 @@ antiUnify pid a u v = do
     fallback = blockTermOnProblem a u pid
 
 antiUnifyArgs :: MonadConversion m => ProblemId -> Dom Type -> Arg Term -> Arg Term -> m (Arg Term)
-antiUnifyArgs pid dom u v = ifM (isIrrelevantOrPropM dom)
-  {-then-} (return u)
-  {-else-} ((<$ u) <$> antiUnify pid (unDom dom) (unArg u) (unArg v))
+antiUnifyArgs pid dom u v
+  | getModality u /= getModality v = patternViolation
+  | otherwise = applyModalityToContext u $
+    ifM (isIrrelevantOrPropM dom)
+    {-then-} (return u)
+    {-else-} ((<$ u) <$> antiUnify pid (unDom dom) (unArg u) (unArg v))
 
 antiUnifyType :: MonadConversion m => ProblemId -> Type -> Type -> m Type
 antiUnifyType pid (El s a) (El _ b) = workOnTypes $ El s <$> antiUnify pid (sort s) a b
@@ -911,7 +921,7 @@ compareElims pols0 fors0 a v els01 els02 = (catchConstraint (ElimCmp pols0 fors0
             solved <- isProblemSolved pid
             reportSLn "tc.conv.elim" 90 $ "solved = " ++ show solved
             arg <- if dependent && not solved
-                   then do
+                   then applyModalityToContext info $ do
                     reportSDoc "tc.conv.elims" 30 $ vcat $
                       [ "Trying antiUnify:"
                       , nest 2 $ "b    =" <+> prettyTCM b
