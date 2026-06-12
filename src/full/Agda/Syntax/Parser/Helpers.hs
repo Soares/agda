@@ -501,6 +501,22 @@ exprToPattern e = case C.isPattern e of
   Nothing -> parseErrorRange e $ "Not a valid pattern: " ++ prettyShow e
   Just p  -> pure p
 
+-- | Interpret a parenthesized typed binding @(x y : T)@ as a sequence of
+--   type-ascribed pattern variables (one 'Ann' per name).  Used for LHS
+--   atoms.
+mkAscriptions :: Range -> TypedBinding -> Parser (List1 Expr)
+mkAscriptions r (TBind _ xs t) = traverse go xs
+  where
+    go (Arg ai (Named nm b))
+      | not (visible ai) = parseErrorRange r
+          "Hidden binders are not allowed in type-ascribed patterns"
+      | isJust nm = parseErrorRange r
+          "Named binders are not allowed in type-ascribed patterns"
+      | isJust (binderPattern b) = parseErrorRange r
+          "Pattern binders in type-ascribed patterns are not yet implemented"
+      | otherwise = pure $ Ann r (boundName $ binderName b) t
+mkAscriptions r TLet{} = parseErrorRange r "Expected a typed binding"
+
 -- | Turn an expression into a name. Fails if the expression is not a
 --   valid identifier.
 exprToName :: Expr -> Parser Name

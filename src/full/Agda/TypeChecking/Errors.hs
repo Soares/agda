@@ -385,6 +385,7 @@ instance PrettyTCM TypeError where
         A.WithP{}   -> "with"
         A.EqualP{}  -> "equality"
         A.AsP _ _ p -> kindOfPattern p
+        A.AnnP _ _ p -> kindOfPattern p
         A.PatternSynP{} -> __IMPOSSIBLE__
 
     CannotEliminateWithProjection _ ty isAmbiguous projection -> sep

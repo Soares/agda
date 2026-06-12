@@ -1234,27 +1234,31 @@ LHSWithExprs
 LHSApplication :: { List1 Expr }
 LHSApplication
     : Expr2_P(NoRecordUpdate)                   { singleton $1 }
-    | LHSAtom_P(NoRecordUpdate) LHSApplicationR { $1 <| $2 }
+    | LHSAtom_P(NoRecordUpdate) LHSApplicationR { $1 <> $2 }
 
--- Like 'Application', but allowing ascription atoms.
+-- Like 'Application', but allowing ascription atoms.  An ascription
+-- can also be the last atom of the spine, hence the extra base case.
 LHSApplicationR :: { List1 Expr }
 LHSApplicationR
-    : Expr2_P(RecordUpdate)                  { singleton $1 }
-    | LHSAtom_P(RecordUpdate) LHSApplicationR { $1 <| $2 }
+    : Expr2_P(RecordUpdate)                   { singleton $1 }
+    | '(' TBindWithHiding ')'                 {% mkAscriptions (getRange ($1,$2,$3)) $2 }
+    | LHSAtom_P(RecordUpdate) LHSApplicationR { $1 <> $2 }
 
 LHSApplication3 :: { List1 Expr }
 LHSApplication3
-    : LHSAtom_P(NoRecordUpdate)                  { singleton $1 }
-    | LHSAtom_P(NoRecordUpdate) LHSApplication3R { $1 <| $2 }
+    : LHSAtom_P(NoRecordUpdate)                  { $1 }
+    | LHSAtom_P(NoRecordUpdate) LHSApplication3R { $1 <> $2 }
 
 LHSApplication3R :: { List1 Expr }
 LHSApplication3R
-    : LHSAtom_P(RecordUpdate)                  { singleton $1 }
-    | LHSAtom_P(RecordUpdate) LHSApplication3R { $1 <| $2 }
+    : LHSAtom_P(RecordUpdate)                  { $1 }
+    | LHSAtom_P(RecordUpdate) LHSApplication3R { $1 <> $2 }
 
+-- An ascription atom @(x y : T)@ expands to one 'Ann' expression per
+-- name, hence atoms produce lists.
 LHSAtom_P(recordUpdate)
-    : Expr3_P(recordUpdate)   { $1 }
-    | '(' TBindWithHiding ')' {% parseError "Type-ascribed patterns are not yet implemented" }
+    : Expr3_P(recordUpdate)   { singleton $1 }
+    | '(' TBindWithHiding ')' {% mkAscriptions (getRange ($1,$2,$3)) $2 }
 
 -- Parsing either an expression @e@ or a @(rewrite | with p <-) e1 | ... | en@.
 HoleContent :: { HoleContent }

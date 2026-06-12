@@ -68,6 +68,8 @@ instance MapNamedArgPattern NAP where
       AsP i x p0         -> f $ updateNamedArg (AsP i x) $ mapNamedArgPattern f $ setNamedArg p p0
       -- WithP: like AsP
       WithP i p0         -> f $ updateNamedArg (WithP i) $ mapNamedArgPattern f $ setNamedArg p p0
+      -- AnnP: like AsP
+      AnnP i e p0        -> f $ updateNamedArg (AnnP i e) $ mapNamedArgPattern f $ setNamedArg p p0
 
 instance MapNamedArgPattern a => MapNamedArgPattern [a]                  where
 instance MapNamedArgPattern a => MapNamedArgPattern (FieldAssignment' a) where
@@ -146,6 +148,7 @@ instance APatternLike (Pattern' a) where
       RecP _ _ ps        -> foldrAPattern f ps
       PatternSynP _ _ ps -> foldrAPattern f ps
       WithP _ p          -> foldrAPattern f p
+      AnnP _ _ p         -> foldrAPattern f p
       VarP _             -> mempty
       ProjP _ _ _        -> mempty
       WildP _            -> mempty
@@ -172,6 +175,7 @@ instance APatternLike (Pattern' a) where
       A.RecP    kwr i    ps -> A.RecP    kwr i    <$> traverseAPatternM pre post ps
       A.PatternSynP i x  ps -> A.PatternSynP i x  <$> traverseAPatternM pre post ps
       A.WithP       i p     -> A.WithP       i    <$> traverseAPatternM pre post p
+      A.AnnP        i e  p  -> A.AnnP        i e  <$> traverseAPatternM pre post p
 
 instance APatternLike a => APatternLike (Arg a) where
   type ADotT (Arg a) = ADotT a
@@ -214,6 +218,7 @@ patternVars p = foldAPattern f p `appEndo` []
     A.VarP x         -> Endo (unBind x :)
     A.AsP _ x _      -> Endo (unBind x :)
     A.LitP        {} -> mempty
+    A.AnnP        {} -> mempty
     A.ConP        {} -> mempty
     A.RecP        {} -> mempty
     A.DefP        {} -> mempty
@@ -278,6 +283,7 @@ substPattern' subE s = mapAPattern $ \ p -> case p of
   VarP x            -> fromMaybe p $ lookup (A.unBind x) s
   DotP i e          -> DotP i $ subE e
   EqualP i es       -> EqualP i $ fmap (subE *** subE) es
+  AnnP i e p'       -> AnnP i (subE e) p'
   -- No action on the other patterns (besides the recursion):
   ConP _ _ _        -> p
   RecP _ _ _        -> p
@@ -328,6 +334,7 @@ instance PatternToExpr Pattern Expr where
     DefP _ fs ps       -> app (Def $ headAmbQ fs) <$> patToExpr ps
     WildP _            -> return $ Underscore emptyMetaInfo
     AsP _ _ p          -> patToExpr p
+    AnnP _ _ p         -> patToExpr p
     DotP _ e           -> return e
     -- Issue #7176: An absurd pattern in an instance position should turn into an instance meta:
     AbsurdP _          -> asks hidingToMetaKind <&> \ k -> Underscore emptyMetaInfo{ metaKind = k }
@@ -353,6 +360,7 @@ noDotOrEqPattern err = dot
       A.ProjP i o d          -> pure $ A.ProjP i o d
       A.WildP i              -> pure $ A.WildP i
       A.AsP i x p            -> A.AsP i x <$> dot p
+      A.AnnP{}               -> err
       A.DotP{}               -> err
       A.EqualP{}             -> err   -- Andrea: so we also disallow = patterns, reasonable?
       A.AbsurdP i            -> pure $ A.AbsurdP i

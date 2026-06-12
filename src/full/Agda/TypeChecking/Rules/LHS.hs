@@ -312,6 +312,7 @@ problemAllVariables problem =
     isSolved A.AbsurdP{}     = True
     -- recursive cases
     isSolved (A.AsP _ _ p)   = isSolved p
+    isSolved (A.AnnP _ _ p)  = isSolved p
     -- impossible:
     isSolved A.ProjP{}       = __IMPOSSIBLE__
     isSolved A.DefP{}        = __IMPOSSIBLE__
@@ -335,6 +336,7 @@ noShadowingOfConstructors problem@(ProblemEq p _ dom@(unDom -> El _ a)) = do
    A.DotP        {} -> return ()
    A.EqualP      {} -> return ()
    A.AsP _ _ p      -> noShadowingOfConstructors $ problem { problemInPat = p }
+   A.AnnP _ _ p     -> noShadowingOfConstructors $ problem { problemInPat = p }
    A.ConP        {} -> __IMPOSSIBLE__
    A.RecP        {} -> __IMPOSSIBLE__
    A.ProjP       {} -> __IMPOSSIBLE__
@@ -492,6 +494,7 @@ transferOrigins ps qs = do
     patOrig A.AbsurdP{}     = PatOAbsurd
     patOrig A.LitP{}        = PatOLit
     patOrig A.EqualP{}      = PatOCon --TODO: origin for EqualP
+    patOrig (A.AnnP _ _ p)  = patOrig p
     patOrig A.AsP{}         = __IMPOSSIBLE__
     patOrig A.ProjP{}       = __IMPOSSIBLE__
     patOrig A.DefP{}        = __IMPOSSIBLE__
@@ -548,6 +551,12 @@ checkPatternLinearity eqs = do
               check (Map.insert x (u,unDom a) vars) eqs
         A.AsP _ x p ->
           check vars $ [ProblemEq (A.VarP x) u a, ProblemEq p u a] ++! eqs
+        A.AnnP i e p ->
+          -- Keep the annotation (as a wrapper around a wildcard, so it
+          -- contributes exactly a type annotation to the leftover
+          -- patterns) and check the sub-pattern for linearity.
+          (ProblemEq (A.AnnP i e (A.WildP empty)) u a :) <$>
+            check vars (ProblemEq p u a : eqs)
         A.WildP{}       -> continue
         A.DotP{}        -> continue
         A.AbsurdP{}     -> continue
@@ -979,6 +988,7 @@ splitStrategy = filter shouldSplit
       A.AbsurdP{} -> False
 
       A.AsP _ _ p  -> shouldSplit $ problem { problemInPat = p }
+      A.AnnP _ _ p -> shouldSplit $ problem { problemInPat = p }
 
       A.ProjP{}       -> __IMPOSSIBLE__
       A.DefP{}        -> __IMPOSSIBLE__
@@ -1078,6 +1088,7 @@ checkLHS mf = updateModality checkLHS_ where
             p@(A.ConP _ c ps) -> splitCon delta1 dom adelta2 p $ Just c
             p@(A.EqualP _ ts) -> notRecPat $ splitPartial delta1 dom adelta2 ts
             A.AsP _ _ p       -> splitOnPat p
+            A.AnnP _ _ p      -> splitOnPat p
 
             A.VarP{}        -> __IMPOSSIBLE__
             A.WildP{}       -> __IMPOSSIBLE__

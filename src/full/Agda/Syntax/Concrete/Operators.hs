@@ -592,6 +592,7 @@ parsePat parse = loop
     InstanceP _ _    -> fail "bad instance argument"
     AsP r x p        -> AsP r x <$> loop p
     p@DotP{}         -> return p
+    p@AnnP{}         -> return p
     ParenP _r p      -> fullParen' <$> loop p
     p@WildP{}        -> return p
     p@AbsurdP{}      -> return p
@@ -856,6 +857,7 @@ validConPattern cons = loop
       RecP{}      :| _:_ -> failure
       WildP{}     :| _:_ -> failure
       WithP{}     :| _:_ -> failure
+      AnnP{}      :| _:_ -> failure
     where
     ok      = return ()
     failure = throwError $ Just p
@@ -885,6 +887,7 @@ appView = loop []
     p@EqualP{}       -> ret p
     p@EllipsisP{}    -> ret p
     p@WithP{}        -> ret p
+    p@AnnP{}         -> ret p
    where
    ret p = p :| reverse acc
 

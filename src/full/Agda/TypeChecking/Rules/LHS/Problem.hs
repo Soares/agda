@@ -322,6 +322,7 @@ getLeftoverPatterns eqs = do
     asPattern x v a      = empty { asPatterns       = singleton (AsB x v a) }
     dotPattern e v a     = empty { dotPatterns      = singleton (Dot e v a) }
     absurdPattern info a = empty { absurdPatterns   = singleton (Absurd info a) }
+    annPattern e a       = empty { typeAnnotations  = singleton (Ann e a) }
     otherPattern p       = empty { otherPatterns    = singleton p }
 
     getLeftoverPattern :: (A.Name -> PatVarPosition) -> ProblemEq -> m LeftoverPatterns
@@ -342,6 +343,8 @@ getLeftoverPatterns eqs = do
       (A.AsP info A.BindName{unBind = x} p)  -> (asPattern x v a `mappend`) <$> do
         getLeftoverPattern isParamName $ ProblemEq p v a
       (A.DotP info e)   -> return $ dotPattern e v a
+      (A.AnnP info e p) -> (annPattern e (unDom a) `mappend`) <$> do
+        getLeftoverPattern isParamName $ ProblemEq p v a
       (A.AbsurdP info)  -> return $ absurdPattern (getRange info) (unDom a)
       _                 -> return $ otherPattern p
 

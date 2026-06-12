@@ -561,6 +561,8 @@ data Pattern' e
   | RecP KwRange ConPatInfo [FieldAssignment' (Pattern' e)]
   | EqualP PatInfo (List1 (e, e))
   | WithP PatInfo (Pattern' e)  -- ^ @| p@, for with-patterns.
+  | AnnP PatInfo e (Pattern' e)
+    -- ^ Type-ascribed pattern @(x : ty)@; the expression is the type.
   deriving (Show, Functor, Foldable, Traversable, Eq, Generic)
 
 type NAPs e   = [NamedArg (Pattern' e)]
@@ -750,6 +752,7 @@ instance HasRange (Pattern' e) where
     getRange (RecP _kwr i _)     = getRange i
     getRange (EqualP i _)        = getRange i
     getRange (WithP i _)         = getRange i
+    getRange (AnnP i _ _)        = getRange i
 
 instance HasRange SpineLHS where
     getRange (SpineLHS i _ _)  = getRange i
@@ -796,6 +799,7 @@ instance SetRange (Pattern' a) where
     setRange r (RecP _ i as)        = RecP empty (setRange r i) as
     setRange r (EqualP _ es)        = EqualP (PatRange r) es
     setRange r (WithP i p)          = WithP (setRange r i) p
+    setRange r (AnnP i e p)         = AnnP (setRange r i) e p
 
 
 instance KillRange a => KillRange (Binder' a) where
@@ -901,6 +905,7 @@ instance KillRange e => KillRange (Pattern' e) where
   killRange (RecP kwr i as)     = killRangeN RecP kwr i as
   killRange (EqualP i es)       = killRangeN EqualP i es
   killRange (WithP i p)         = killRangeN WithP i p
+  killRange (AnnP i e p)        = killRangeN AnnP i e p
 
 instance KillRange SpineLHS where
   killRange (SpineLHS i a b)  = killRangeN SpineLHS i a b

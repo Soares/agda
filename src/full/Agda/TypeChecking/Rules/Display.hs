@@ -103,6 +103,7 @@ patternToTerm p ret =
     A.LitP _ l                      -> ret 0 $ IsApp $ Lit l
     A.WildP _                       -> bindWild $ ret 1 var0
     A.AsP{}                         -> failP "an @-pattern"
+    A.AnnP{}                        -> failP "an ascription pattern"
     A.DotP{}                        -> failP "a dot pattern"
     A.AbsurdP{}                     -> failP "an absurd pattern"
     A.PatternSynP{}                 -> __IMPOSSIBLE__

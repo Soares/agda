@@ -179,6 +179,7 @@ instance BoundAndUsed e => BoundAndUsed (Pattern' e) where
     RecP _ _ as        -> parBoundAndUsed as
     EqualP _ eqs       -> parBoundAndUsed eqs
     WithP _ p          -> boundAndUsed p
+    AnnP _ e p         -> boundAndUsed e <> boundAndUsed p
 
 instance BoundAndUsed e => BoundAndUsed (FieldAssignment' e) where
   boundAndUsed (FieldAssignment _ e) = boundAndUsed e

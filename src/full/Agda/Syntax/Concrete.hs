@@ -199,6 +199,9 @@ data Expr
   | DontCare Expr                              -- ^ to print irrelevant things
   | Equal Range Expr Expr                      -- ^ ex: @a = b@, used internally in the parser
   | Ellipsis Range                             -- ^ @...@, used internally to parse patterns.
+  | Ann Range Name Expr                        -- ^ ex: @(x : T)@ in a LHS: type-ascribed
+                                               --   pattern variable; used internally in the
+                                               --   parser, becomes 'AnnP'.
   | KnownIdent Aspects QName
     -- ^ An identifier coming from abstract syntax, for which we know a
     -- precise syntactic highlighting class (used in printing).
@@ -254,6 +257,7 @@ data Pattern
                                            --   Second arg is @Nothing@ before expansion, and
                                            --   @Just p@ after expanding ellipsis to @p@.
   | WithP Range Pattern                    -- ^ @| p@, for with-patterns.
+  | AnnP Range Name Expr                   -- ^ @(x : T)@, a type-ascribed pattern variable.
   deriving Eq
 
 -- | Can a dot pattern be interpreted as projection pattern?
@@ -874,6 +878,7 @@ exprToPattern fallback = loop
     Quote       r        -> pure $ QuoteP r
     Equal       r e1 e2  -> pure $ EqualP r $ singleton (e1, e2)
     Ellipsis    r        -> pure $ EllipsisP r Nothing
+    Ann         r x e    -> pure $ AnnP r x e
     e@(Rec kwr r es)
         -- We cannot translate record expressions with module parts.
       | Just fs <- mapM maybeLeft es -> RecP kwr r <$> traverse (traverse loop) fs
@@ -1013,6 +1018,7 @@ instance HasRange Expr where
       DontCare{}             -> noRange
       Equal r _ _            -> r
       Ellipsis r             -> r
+      Ann r _ _              -> r
       Generalized e          -> getRange e
       KnownIdent _ q         -> getRange q
       KnownOpApp _ r _ _ _   -> r
@@ -1163,6 +1169,7 @@ instance HasRange Pattern where
   getRange (EqualP r _)       = r
   getRange (EllipsisP r _)    = r
   getRange (WithP r _)        = r
+  getRange (AnnP r _ _)       = r
 
 -- SetRange instances
 ------------------------------------------------------------------------
@@ -1185,6 +1192,7 @@ instance SetRange Pattern where
   setRange r (EqualP _ es)      = EqualP r es
   setRange r (EllipsisP _ mp)   = EllipsisP r mp
   setRange r (WithP _ p)        = WithP r p
+  setRange r (AnnP _ x e)       = AnnP r x e
 
 instance SetRange TypedBinding where
   setRange r (TBind _ xs e) = TBind r xs e
@@ -1292,6 +1300,7 @@ instance KillRange Expr where
   killRange (Tactic _ t)              = killRangeN (Tactic noRange) t
   killRange (DontCare e)              = killRangeN DontCare e
   killRange (Equal _ x y)             = Equal noRange x y
+  killRange (Ann _ x e)               = killRangeN (Ann noRange) x e
   killRange (Ellipsis _)              = Ellipsis noRange
   killRange (Generalized e)           = killRangeN Generalized e
   killRange (KnownIdent a b)          = killRangeN (KnownIdent a) b
@@ -1339,6 +1348,7 @@ instance KillRange Pattern where
   killRange (EqualP _ es)     = killRangeN (EqualP noRange) es
   killRange (EllipsisP _ mp)  = killRangeN (EllipsisP noRange) mp
   killRange (WithP _ p)       = killRangeN (WithP noRange) p
+  killRange (AnnP _ x e)      = killRangeN (AnnP noRange) x e
 
 instance KillRange Pragma where
   killRange (OptionsPragma _ s)               = OptionsPragma noRange s
@@ -1418,6 +1428,7 @@ instance NFData Expr where
   rnf (Unquote _)              = ()
   rnf (DontCare a)             = rnf a
   rnf (Equal _ a b)            = rnf a `seq` rnf b
+  rnf (Ann _ a b)              = rnf a `seq` rnf b
   rnf (Ellipsis _)             = ()
   rnf (Generalized e)          = rnf e
   rnf (KnownIdent a b)         = rnf b
@@ -1444,6 +1455,7 @@ instance NFData Pattern where
   rnf (EqualP _ es)    = rnf es
   rnf (EllipsisP _ mp) = rnf mp
   rnf (WithP _ a)      = rnf a
+  rnf (AnnP _ a b)     = rnf a `seq` rnf b
 
 -- | Ranges are not forced.
 

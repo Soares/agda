@@ -1483,6 +1483,7 @@ instance ToConcrete (UserPattern A.Pattern) where
                                 bindToConcrete (UserPattern p) $ \ p ->
                                 ret (A.AsP i x p)
       A.WithP i p            -> bindToConcrete (UserPattern p) $ ret . A.WithP i
+      A.AnnP i e p           -> bindToConcrete (UserPattern p) $ ret . A.AnnP i e
 
 instance ToConcrete (UserPattern (NamedArg A.Pattern)) where
   type ConOfAbs (UserPattern (NamedArg A.Pattern)) = NamedArg A.Pattern
@@ -1521,6 +1522,7 @@ instance ToConcrete (SplitPattern A.Pattern) where
       A.AsP i x p            -> bindToConcrete (SplitPattern p)  $ \ p ->
                                 ret (A.AsP i x p)
       A.WithP i p            -> bindToConcrete (SplitPattern p) $ ret . A.WithP i
+      A.AnnP i e p           -> bindToConcrete (SplitPattern p) $ ret . A.AnnP i e
 
 instance ToConcrete (SplitPattern (NamedArg A.Pattern)) where
   type ConOfAbs (SplitPattern (NamedArg A.Pattern)) = NamedArg A.Pattern
@@ -1553,6 +1555,7 @@ instance ToConcrete BindingPattern where
                                 bindToConcrete (BindingPat p)  $ \ p ->
                                 ret (A.AsP i (mkBindName x) p)
       A.WithP i p            -> bindToConcrete (BindingPat p) $ ret . A.WithP i
+      A.AnnP i e p           -> bindToConcrete (BindingPat p) $ ret . A.AnnP i e
 
 instance ToConcrete A.Pattern where
   type ConOfAbs A.Pattern = C.Pattern
@@ -1625,6 +1628,13 @@ instance ToConcrete A.Pattern where
         C.RecP kwr (getRange i) <$> mapM (traverse toConcrete) as
 
       A.WithP i p -> C.WithP (getRange i) <$> toConcreteCtx WithArgCtx p
+
+      A.AnnP i e p -> do
+        e <- toConcreteCtx TopCtx e
+        toConcrete p <&> \case
+          C.IdentP _ (C.QName x) -> C.AnnP (getRange i) x e
+          C.WildP r              -> C.AnnP (getRange i) (C.noName r) e
+          c                      -> c
 
     where
 

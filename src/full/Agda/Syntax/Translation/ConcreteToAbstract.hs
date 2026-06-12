@@ -871,6 +871,10 @@ instance ToAbstract C.Expr where
 
   -- Names
       C.Ident x -> toAbstract (OldQName x Nothing)
+
+  -- Type-ascribed pattern variables only exist inside left hand sides
+  -- and are eliminated by the pattern translation in the parser.
+      C.Ann{} -> __IMPOSSIBLE__
       C.KnownIdent _ x -> toAbstract (OldQName x Nothing)
       -- Just discard the syntax highlighting information.
 
@@ -1790,6 +1794,7 @@ scopeCheckLetDef wh d = setCurrentRange d do
             definedName C.LitP{}               = Nothing
             definedName C.RecP{}               = Nothing
             definedName C.QuoteP{}             = Nothing
+            definedName C.AnnP{}               = Nothing
             definedName C.HiddenP{}            = Nothing -- Not impossible, see issue #2291
             definedName C.InstanceP{}          = Nothing
             definedName C.WithP{}              = Nothing
@@ -1846,6 +1851,7 @@ scopeCheckLetDef wh d = setCurrentRange d do
       allowedPat A.ConP{}      = True
       allowedPat A.WildP{}     = True
       allowedPat (A.AsP _ _ x) = allowedPat x
+      allowedPat (A.AnnP _ _ x) = allowedPat x
       allowedPat (A.RecP _ _ as) = all (allowedPat . view exprFieldA) as
       allowedPat (A.PatternSynP _ _ as) = all (allowedPat . namedArg) as
 
@@ -3857,6 +3863,7 @@ applyAPattern p0 p ps1 = do
       A.RecP{}    -> failure
       A.EqualP{}  -> failure
       A.WithP{}   -> failure
+      A.AnnP{}    -> failure
   where
     failure = typeError $ InvalidPattern p0
 
@@ -4009,6 +4016,17 @@ instance ToAbstract CPattern where
     C.AbsurdP r -> return $ A.AbsurdP $ PatRange r
     C.RecP kwr r fs -> A.RecP kwr (ConPatInfo ConORec (PatRange r) ConPatEager) <$> mapM (traverse $ toAbstract . wrap) fs
     C.WithP r p -> A.WithP (PatRange r) <$> toAbstract p  -- not in DISPLAY pragma
+
+    -- Type-ascribed pattern variable @(x : ty)@: the name always binds
+    -- a variable (binder semantics, like lambda binders), and the type
+    -- is checked against the domain by the LHS type checker.  The type
+    -- expression is translated in the second pattern phase, together
+    -- with the dot patterns, so it may refer to pattern variables.
+    C.AnnP r x ty
+      | isNoName x -> return $ A.AnnP (PatRange r) ty $ A.WildP $ PatRange $ getRange x
+      | otherwise  -> do
+          y <- bindPatternVariable NotHidden x
+          return $ A.AnnP (PatRange r) ty $ A.VarP $ A.mkBindName y
 
     where
       -- Pass on @displayLhs@ context

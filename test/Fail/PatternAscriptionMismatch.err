@@ -1,0 +1,8 @@
+PatternAscriptionMismatch.agda:8.1-15: error: [UnequalTypes]
+The types
+  Nat
+and
+  Bool
+are not equal
+when checking the clause left hand side
+bad (b : Bool)

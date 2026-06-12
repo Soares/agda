@@ -152,6 +152,7 @@ instance ExprLike Expr where
      DontCare e              -> f $ DontCare               $ mapE e
      Equal{}                 -> f $ e0
      Ellipsis{}              -> f $ e0
+     Ann r x e               -> f $ Ann r x                $ mapE e
      Generalized e           -> f $ Generalized            $ mapE e
      KnownIdent{}            -> f $ e0
      KnownOpApp nk r q ns es -> f $ KnownOpApp nk r q ns   $ mapE es

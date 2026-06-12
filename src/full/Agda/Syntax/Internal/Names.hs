@@ -414,6 +414,7 @@ instance NamesIn ConPatternInfo where
 instance NamesIn (A.Pattern' a) where
   namesAndMetasIn' sg = \case
     A.VarP _               -> mempty
+    A.AnnP _ _ p           -> namesAndMetasIn' sg p
     A.ConP _ c args        -> namesAndMetasIn' sg (c, args)
     A.ProjP _ _ d          -> namesAndMetasIn' sg d
     A.DefP _ f args        -> namesAndMetasIn' sg (f, args)

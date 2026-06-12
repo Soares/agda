@@ -206,6 +206,7 @@ instance CPatternLike Pattern where
       LitP _ _        -> mempty
       QuoteP _        -> mempty
       EqualP _ _      -> mempty
+      AnnP _ _ _      -> mempty
 
   traverseCPatternA f p0 = f p0 $ case p0 of
       -- Recursive cases:
@@ -227,6 +228,7 @@ instance CPatternLike Pattern where
       LitP _ _        -> pure p0
       QuoteP _        -> pure p0
       EqualP _ _      -> pure p0
+      AnnP _ _ _      -> pure p0
 
   traverseCPatternM pre post = pre >=> recurse >=> post
     where
@@ -250,6 +252,7 @@ instance CPatternLike Pattern where
       LitP _ _        -> return p0
       QuoteP _        -> return p0
       EqualP _ _      -> return p0
+      AnnP _ _ _      -> return p0
 
 instance (CPatternLike a, CPatternLike b) => CPatternLike (a,b) where
   foldrCPattern f (p, p') =
@@ -325,6 +328,7 @@ patternQNames p = foldCPattern f p `appEndo` []
     QuoteP _       -> mempty
     InstanceP _ _  -> mempty
     RecP _ _ _     -> mempty
+    AnnP _ _ _     -> mempty
     EqualP _ _     -> mempty
     EllipsisP _ _  -> mempty
 

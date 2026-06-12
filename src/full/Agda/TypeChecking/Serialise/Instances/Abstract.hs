@@ -176,6 +176,7 @@ instance EmbPrj a => EmbPrj (A.Pattern' a) where
     (A.RecP r a b)        -> runReaderT (icodeN 10 (A.RecP r) a b) dict
     (A.EqualP _ a)        -> __IMPOSSIBLE__ dict
     (A.WithP i a)         -> runReaderT (icodeN 11 (A.WithP i) a) dict
+    (A.AnnP _ _ _)        -> __IMPOSSIBLE__ dict
 
   value x = ReaderT \dict -> runReaderT (vcase valu x) dict where
     valu x = ReaderT \dict -> case x of

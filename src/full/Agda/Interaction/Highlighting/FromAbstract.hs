@@ -293,6 +293,10 @@ instance (Hilite a, IsProjP a) => Hilite (A.Pattern' a) where
       A.RecP _kwr _r ps      -> hl ps
       A.EqualP _r ps         -> hl ps
       A.WithP _ p            -> hl p
+      A.AnnP _r _e p         -> hl p
+        -- Not hiliting the type to avoid instantiating @Hilite e@; the
+        -- ascription type gets highlighting via the expression in the
+        -- type checker anyway.
 
     where
     hl a = hilite a

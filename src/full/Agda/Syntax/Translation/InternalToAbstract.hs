@@ -1109,6 +1109,7 @@ stripImplicits toKeep params ps = do
             p@(A.AbsurdP _)     -> p
             p@(A.LitP _ _)      -> p
             A.AsP i x p         -> A.AsP i x $ stripPat p
+            A.AnnP i e p        -> A.AnnP i e $ stripPat p
             A.PatternSynP _ _ _ -> __IMPOSSIBLE__
             A.RecP kwr i fs     -> A.RecP kwr i $ map' (fmap stripPat) fs  -- TODO Andreas: is this right?
             p@A.EqualP{}        -> p -- EqualP cannot be blanked.
@@ -1193,6 +1194,7 @@ instance BlankVars A.Pattern where
     A.AbsurdP _   -> p
     A.LitP _ _    -> p
     A.AsP i n p   -> A.AsP i n $ blank bound p
+    A.AnnP i e p  -> A.AnnP i (blank bound e) $ blank bound p
     A.PatternSynP _ _ _ -> __IMPOSSIBLE__
     A.RecP kwr i fs -> A.RecP kwr i $ blank bound fs
     A.EqualP{}    -> p
@@ -1282,6 +1284,7 @@ instance Binder A.Pattern where
     A.PatternSynP _ _ _ -> empty
     A.RecP _ _ _        -> empty
     A.EqualP{}          -> empty
+    A.AnnP{}            -> empty
     A.WithP _ _         -> empty
 
 instance Binder a => Binder (A.Binder' a) where
