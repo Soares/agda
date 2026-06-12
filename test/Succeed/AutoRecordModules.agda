@@ -100,3 +100,17 @@ fourteen = WithParam.double M 7
 module FamParam (Y : Bool → Magma) where
   use : (b : Bool) → Y.Carrier b → Y.Carrier b
   use b y = Y._∘_ b y y
+
+-- Typed lambda binders get a let-scoped synonym.
+lamTest : Magma → Nat → Nat
+lamTest = λ (Z : Magma) n → n + 1
+
+lamTest2 : (X : Magma) → Magma.Carrier X → Magma.Carrier X
+lamTest2 = λ (X : Magma) x → x X.∘ x
+
+-- Typed let binders get a synonym for subsequent bindings and the body.
+letTest : Nat
+letTest =
+  let L : Magma
+      L = M
+  in 3 L.∘ 4

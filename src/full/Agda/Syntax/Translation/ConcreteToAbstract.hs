@@ -806,11 +806,21 @@ toAbstractLam :: Range -> List1 C.LamBinding -> C.Expr -> Precedence -> ScopeM A
 toAbstractLam r bs e ctx = do
   -- Translate the binders
   lvars0 <- getLocalVars
-  localToAbstract (fmap (C.DomainFull . makeDomainFull) bs) $ \ bs -> do
+  let tbs = fmap makeDomainFull bs
+  localToAbstract (fmap C.DomainFull tbs) $ \ bs -> do
     lvars1 <- getLocalVars
     checkNoShadowing lvars0 lvars1
+    -- Auto record module synonyms for typed binders of record type
+    -- (--auto-record-modules).  Untyped binders get an 'C.Underscore'
+    -- type from 'makeDomainFull' and are skipped by the record-target
+    -- analysis.
+    lets <- catMaybes <$>
+      mapM (uncurry autoRecordLetSynonym) (telParamsWithTypes $ List1.toList tbs)
     -- Translate the body
     e <- toAbstractCtx ctx e
+    let e' = case lets of
+          []     -> e
+          l : ls -> A.Let (ExprRange r) (l :| ls) e
     -- We have at least one binder.  Get first @b@ and rest @bs@.
     return $ case List1.catMaybes bs of
       -- Andreas, 2020-06-18
@@ -818,8 +828,8 @@ toAbstractLam r bs e ctx = do
       --   λ (let
       --        mutual -- warning: empty mutual block
       --     ) -> Set
-      []   -> e
-      b:bs -> A.Lam (ExprRange r) b $ foldr mkLam e bs
+      []   -> e'
+      b:bs -> A.Lam (ExprRange r) b $ foldr mkLam e' bs
   where
     mkLam b e = A.Lam (ExprRange $ fuseRange b e) b e
 
@@ -1709,6 +1719,10 @@ scopeCheckLetDef wh d = setCurrentRange d do
     NiceMutual _ _ _ _ d@(C.FunSig _ access _ instanc macro info _ _ x t :| [C.FunDef _ _ abstract _ _ _ _ (cl :| [])]) -> do
       checkLetDefInfo wh access macro abstract
 
+      -- Keep the concrete name and type for the auto record module
+      -- synonym (--auto-record-modules).
+      let (cx, ct) = (x, t)
+
       t <- toAbstract t
       -- We bind the name here to make sure it's in scope for the LHS (#917).
       -- It's unbound for the RHS in letToAbstract.
@@ -1734,9 +1748,10 @@ scopeCheckLetDef wh d = setCurrentRange d do
             InstanceDef _  -> makeInstance info
             NotInstanceDef -> info
 
+      msyn <- autoRecordLetSynonym cx ct
       return $
         A.LetBind (LetRange $ getRange d) info' (A.mkBindName x2) t e :|
-        []
+        maybeToList msyn
 
     -- Function signature without a body
     C.Axiom _ acc abs instanc info x t -> do
@@ -2746,7 +2761,20 @@ telParamsWithTypes tel =
   ]
 
 autoRecordModuleSynonym :: Access -> C.Name -> C.Expr -> ScopeM (Maybe A.Declaration)
-autoRecordModuleSynonym p x t = runMaybeT $ do
+autoRecordModuleSynonym = autoRecordModuleSynonym' Apply TopOpenModule
+
+-- | Variant of 'autoRecordModuleSynonym' for @let@-bound module
+--   synonyms (e.g. for typed lambda binders).
+autoRecordLetSynonym :: C.Name -> C.Expr -> ScopeM (Maybe A.LetBinding)
+autoRecordLetSynonym = autoRecordModuleSynonym' LetApply LetOpenModule privateAccessInserted
+
+autoRecordModuleSynonym'
+  :: (ToConcrete a, Pretty (ConOfAbs a))
+  => (ModuleInfo -> Erased -> ModuleName -> A.ModuleApplication
+      -> ScopeCopyInfo -> A.ImportDirective -> a)
+  -> OpenKind
+  -> Access -> C.Name -> C.Expr -> ScopeM (Maybe a)
+autoRecordModuleSynonym' apply kind p x t = runMaybeT $ do
   guardM $ lift $ optAutoRecordModules <$> pragmaOptions
   -- The synonym needs a plain module name: skip operators and @_@.
   guard $ not (isNoName x) && not (C.isOperator x)
@@ -2769,7 +2797,7 @@ autoRecordModuleSynonym p x t = runMaybeT $ do
   -- hidden in the record module's telescope, so we do not pass them;
   -- they are solved by unification against the type of @x Δ@.
   let modapp = C.SectionApp (getRange t) tel hd [selfApp vars]
-  lift $ checkModuleMacro Apply TopOpenModule (getRange x) p defaultErased x
+  lift $ checkModuleMacro apply kind (getRange x) p defaultErased x
            modapp DontOpen defaultImportDir
   where
     -- Split a concrete type into its domains and target.
