@@ -2993,6 +2993,15 @@ autoRecordModuleSynonym'
   -> WarnNoSynonym
   -> Access -> C.Name -> C.Expr -> ScopeM (Maybe a)
 autoRecordModuleSynonym' apply kind warn p x t = runMaybeT $ do
+  modapp <- synonymModApp warn x t
+  lift $ checkModuleMacro apply kind (getRange x) p defaultErased x
+           modapp DontOpen defaultImportDir
+
+-- | Build the concrete module application @R Δ (x Δ)@ underlying the
+--   module synonym @module x Δ = R (x Δ)@ for a name @x : Δ → R ps@.
+--   Nothing if the type is not cleanly record headed.
+synonymModApp :: WarnNoSynonym -> C.Name -> C.Expr -> MaybeT ScopeM C.ModuleApplication
+synonymModApp warn x t = do
   guardM $ lift $ optAutoRecordModules <$> pragmaOptions
   let (dom, target) = peelDomains t
   (hd, _ps) <- targetParts target
@@ -3023,9 +3032,7 @@ autoRecordModuleSynonym' apply kind warn p x t = runMaybeT $ do
   -- The module application @R (x Δ)@.  The record parameters are all
   -- hidden in the record module's telescope, so we do not pass them;
   -- they are solved by unification against the type of @x Δ@.
-  let modapp = C.SectionApp (getRange t) tel hd [selfApp vars]
-  lift $ checkModuleMacro apply kind (getRange x) p defaultErased x
-           modapp DontOpen defaultImportDir
+  return $ C.SectionApp (getRange t) tel hd [selfApp vars]
   where
     -- Turn the domains into a module telescope, naming anonymous ones,
     -- and return the variables to apply @x@ to.
@@ -3038,14 +3045,29 @@ autoRecordModuleSynonym' apply kind warn p x t = runMaybeT $ do
       let tb = C.TBind (getRange ty) (singleton $ Arg ai $ unnamed $ C.mkBinder_ n) ty
       (tel, vs) <- nameDomains (n : avoid) ds
       return (tb : tel, Arg ai (unnamed n) : vs)
-    nameDomains avoid (Right (C.TBind r xs ty) : ds) = do
+    nameDomains avoid (Right tb@(C.TBind r xs ty) : ds) = do
       (avoid', xsvs) <- nameBinders avoid $ List1.toList xs
       let (xs', vs) = unzip xsvs
+      -- The domain types are scope checked anew in the generated
+      -- telescope, so record-headed binders need their own let-bound
+      -- synonyms there, in scope for the rest of the telescope (the
+      -- same rule as for Pi types: f : ∀ {A : R} {x : A.fld} → R').
+      -- Quiet: the original type already warned.
+      lets <- forMaybeM (telParamsWithTypes [tb]) \ (n, nty) ->
+        runMaybeT $ synonymTLet n nty
       (tel, vss) <- nameDomains avoid' ds
       case xs' of
-        b : bs -> return (C.TBind r (b :| bs) ty : tel, vs ++ vss)
+        b : bs -> return (C.TBind r (b :| bs) ty : lets ++ tel, vs ++ vss)
         []     -> __IMPOSSIBLE__
     nameDomains _ (Right C.TLet{} : _) = __IMPOSSIBLE__  -- excluded by plainTBind
+
+    -- A telescope entry @(let module n = R (n Δ))@ for a record-headed
+    -- binder @n@.
+    synonymTLet :: C.Name -> C.Expr -> MaybeT ScopeM C.TypedBinding
+    synonymTLet n nty = do
+      ma <- synonymModApp QuietNoSynonym n nty
+      return $ C.TLet (getRange n) $ singleton $
+        C.ModuleMacro (getRange n) defaultErased n ma DontOpen defaultImportDir
 
     nameBinders
       :: [C.Name] -> [NamedArg C.Binder]
