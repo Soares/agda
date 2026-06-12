@@ -82,8 +82,8 @@ W = record { A = Nat }
 idTwice : W.Twice
 idTwice x = x
 
--- Operator-named definitions are skipped (no module synonym is
--- generated), but must not crash the feature.
+-- Operator-named definitions get no module synonym (with a warning,
+-- see the .warn file), but must not crash the feature.
 _⊗_ : Magma → Magma → Magma
 x ⊗ y = x
 

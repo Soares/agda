@@ -245,6 +245,8 @@ prettyWarning = \case
     -- FixingQuantity s q q' -> fsep $ concat
     --   [ pwords "Replacing illegal quantity", [ pretty q ], pwords s, [ "by", pretty q' ] ]
 
+    NoRecordModuleSynonym d -> return d
+
     FixingRelevance s r r' -> fsep $ concat
       [ pwords "Replacing illegal relevance", [ p r ]
       , ["of", text s], [ "by", p r' ]

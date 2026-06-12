@@ -5133,6 +5133,9 @@ data Warning
   -- --   -- ^ Auto-correcting quantity pertaining to 'String' /from/ /to/.
   | FixingRelevance String Relevance Relevance
     -- ^ Auto-correcting relevance pertaining to 'String' /from/ /to/.
+  | NoRecordModuleSynonym Doc
+    -- ^ @--auto-record-modules@ could not generate a module synonym
+    --   for a record-targeted name; explanation in the 'Doc'.
   | FixingCohesion String Cohesion Cohesion
     -- ^ Auto-correcting cohesion pertaining to 'String' /from/ /to/.
   | FixingPolarity String PolarityModality PolarityModality
@@ -5369,6 +5372,7 @@ warningName = \case
   -- TODO: linearity
   -- FixingQuantity{}             -> FixingQuantity_
   FixingRelevance{}            -> FixingRelevance_
+  NoRecordModuleSynonym{}      -> NoRecordModuleSynonym_
   FixingCohesion{}             -> FixingCohesion_
   FixingPolarity{}             -> FixingPolarity_
   IgnoringRew{}                -> MisplacedRewrite_

@@ -317,6 +317,7 @@ data WarningName
   | FixingCohesion_
   | FixingPolarity_
   | FixingRelevance_
+  | NoRecordModuleSynonym_
   | MisplacedRewrite_
   -- TODO: linearity
   -- -- | FixingQuantity_
@@ -579,6 +580,7 @@ warningNameDescription = \case
   -- TODO: linearity
   -- FixingQuantity_                  -> "Correcting invalid user-written quantity."
   FixingRelevance_                 -> "Correcting invalid user-written relevance attribute."
+  NoRecordModuleSynonym_           -> "No module synonym could be generated for a record-targeted name (--auto-record-modules)."
   FixingCohesion_                  -> "Correcting invalid user-written cohesion attribute."
   FixingPolarity_                  -> "Correcting invalid user-written polarity attribute."
   MisplacedRewrite_                -> "Ignoring invalid user-written local rewrite attribute."

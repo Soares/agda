@@ -135,6 +135,7 @@ instance EmbPrj Warning where
     -- TODO: linearity
     -- FixingQuantity a b c                        -> icodeN 68 FixingQuantity a b c
     FixingRelevance a b c                       -> icodeN 69 FixingRelevance a b c
+    NoRecordModuleSynonym a                     -> icodeN 81 NoRecordModuleSynonym a
     UnusedVariablesInDisplayForm a              -> icodeN 70 UnusedVariablesInDisplayForm a
     HiddenNotInArgumentPosition a               -> __IMPOSSIBLE__
     InstanceNotInArgumentPosition a             -> __IMPOSSIBLE__
@@ -226,6 +227,7 @@ instance EmbPrj Warning where
     -- TODO: linearity
     -- [68, a, b, c]        -> valuN FixingQuantity a b c
     N4 69 a b c   -> valuN FixingRelevance a b c
+    N2 81 a       -> valuN NoRecordModuleSynonym a
     N2 70 a       -> valuN UnusedVariablesInDisplayForm a
     N3 71 a b     -> valuN TooManyPolarities a b
     N4 72 a b c   -> valuN FixingCohesion a b c

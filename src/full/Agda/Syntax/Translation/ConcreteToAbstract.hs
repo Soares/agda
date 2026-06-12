@@ -2852,20 +2852,31 @@ autoRecordModuleSynonym'
   -> Access -> C.Name -> C.Expr -> ScopeM (Maybe a)
 autoRecordModuleSynonym' apply kind p x t = runMaybeT $ do
   guardM $ lift $ optAutoRecordModules <$> pragmaOptions
-  -- The synonym needs a plain module name: skip operators and @_@.
-  guard $ not (isNoName x) && not (C.isOperator x)
   let (dom, target) = peelDomains t
-  -- Domains binding patterns (@x\@p@), @let@s, or carrying leftover
-  -- hiding/relevance wrappers are not supported.
-  guard $ all (either plainDom plainTBind) dom
   (hd, _ps) <- targetParts target
-  -- A domain binder must not shadow the head of the target.
+  -- A domain binder shadowing the head means the target is not a
+  -- record occurrence at all.
   let userNames = concatMap (either (const []) tbindNames) dom
   case hd of
     C.QName h -> guard $ h `notElem` userNames
     C.Qual{}  -> pure ()
   -- The head must resolve to a record type.
   guardM $ lift $ resolvesToRecord hd
+  -- From here on the user plausibly expects a module synonym, so we
+  -- warn instead of failing silently when we cannot generate one.
+  let bail reason = do
+        lift $ setCurrentRange x $ warning $ NoRecordModuleSynonym $ P.fsep $
+          P.pwords "No module synonym was generated for" ++ [P.pretty x <> ","] ++
+          P.pwords "because" ++ P.pwords reason
+        mzero
+  -- A wildcard cannot be qualified, so nothing is lost: stay silent.
+  when (isNoName x) mzero
+  when (C.isOperator x) $
+    bail "operator names cannot be used as module names"
+  -- Domains binding patterns (@x\@p@), @let@s, or carrying leftover
+  -- hiding/relevance wrappers are not supported.
+  unless (all (either plainDom plainTBind) dom) $
+    bail "its type has a domain this feature does not understand"
   -- Invent names for anonymous domains.
   (tel, vars) <- lift $ nameDomains userNames dom
   -- The module application @R (x Δ)@.  The record parameters are all
@@ -3588,7 +3599,9 @@ instance ToAbstract C.Clause where
 patternAscriptions :: C.Pattern -> [(C.Name, C.Expr)]
 patternAscriptions = foldrCPattern step
   where
-    step (C.AnnP _ x ty) acc | not (isNoName x) = (x, ty) : acc
+    step (C.AnnP _ b ty) acc
+      | let x = C.boundName $ C.binderName b
+      , not (isNoName x) = (x, ty) : acc
     step _ acc = acc
 
 whereToAbstract
