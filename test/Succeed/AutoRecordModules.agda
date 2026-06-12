@@ -189,3 +189,8 @@ useUsingWhere X x using (A : Magma) ← X = twice
   where
     twice : Magma.Carrier A
     twice = x A.∘ x
+
+-- Pi-bound variables of record type get a synonym for the rest of the
+-- telescope and the codomain (used heavily in dependent signatures).
+piSyn : ∀ (A : Magma) {q : A.Carrier} → A.Carrier → A.Carrier
+piSyn (A : Magma) x = x A.∘ x

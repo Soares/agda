@@ -1001,13 +1001,48 @@ instance ToAbstract C.Expr where
 
   -- Dependent function type
       e0@(C.Pi tel e) -> do
+        let info = ExprRange (getRange e0)
         lvars0 <- getLocalVars
-        localToAbstract tel $ \tel -> do
-          lvars1 <- getLocalVars
-          checkNoShadowing lvars0 lvars1
-          e <- toAbstractCtx TopCtx e
-          let info = ExprRange (getRange e0)
-          return $ A.mkPi info (List1.catMaybes tel) e
+        -- Auto record module synonyms (--auto-record-modules): a
+        -- record-typed binder (A : R) makes the module synonym A
+        -- available in the rest of the telescope and the codomain, by
+        -- splitting the Pi after the binder and inserting a let-bound
+        -- module.
+        recs <- ifM (optAutoRecordModules <$> pragmaOptions)
+          (mapM tbRecordHeaded $ List1.toList tel)
+          (return $ map (const False) $ List1.toList tel)
+        if not (or recs) then do
+          localToAbstract tel $ \tel -> do
+            lvars1 <- getLocalVars
+            checkNoShadowing lvars0 lvars1
+            e <- toAbstractCtx TopCtx e
+            return $ A.mkPi info (List1.catMaybes tel) e
+        else do
+          let go :: [(C.TypedBinding, Bool)] -> ScopeM A.Expr
+              go [] = do
+                lvars1 <- getLocalVars
+                checkNoShadowing lvars0 lvars1
+                toAbstractCtx TopCtx e
+              go bs = do
+                -- The chunk extends up to and including the first
+                -- record-headed binder.
+                let n = maybe (length bs) (+ 1) $ List.findIndex snd bs
+                    (chunk0, rest) = splitAt n bs
+                    chunk = map fst chunk0
+                    recBinders = [ b | (b, True) <- chunk0 ]
+                localToAbstract chunk $ \ chunk' -> do
+                  lets <- catMaybes <$> mapM (uncurry autoRecordLetSynonym)
+                            (concatMap (\ b -> telParamsWithTypes [b]) recBinders)
+                  body <- go rest
+                  let body' = case lets of
+                        []     -> body
+                        l : ls -> A.Let info (l :| ls) body
+                  return $ A.mkPi info (catMaybes chunk') body'
+          go $ zip (List1.toList tel) recs
+        where
+          tbRecordHeaded = \case
+            C.TBind _ _ ty -> recordHeadedType ty
+            C.TLet{}       -> return False
 
   -- Let
       e0@(C.Let _ ds (Just e)) ->
