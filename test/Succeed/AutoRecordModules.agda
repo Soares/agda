@@ -82,10 +82,18 @@ W = record { A = Nat }
 idTwice : W.Twice
 idTwice x = x
 
--- Operator-named definitions get no module synonym (with a warning,
--- see the .warn file), but must not crash the feature.
+-- Operator-named definitions get module synonyms too (record modules
+-- named _×_ are precedent for operator-named modules).
 _⊗_ : Magma → Magma → Magma
 x ⊗ y = x
+
+twelve : _⊗_.Carrier M M
+twelve = _⊗_._∘_ M M 5 7
+
+-- An unrecognized (irrelevant) domain form warns instead of failing
+-- silently; see the .warn file.
+viaIrr : .Magma → Magma
+viaIrr _ = M
 
 -- Module parameters of record type get a synonym inside the module.
 module WithParam (X : Magma) where

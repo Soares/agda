@@ -2871,8 +2871,6 @@ autoRecordModuleSynonym' apply kind p x t = runMaybeT $ do
         mzero
   -- A wildcard cannot be qualified, so nothing is lost: stay silent.
   when (isNoName x) mzero
-  when (C.isOperator x) $
-    bail "operator names cannot be used as module names"
   -- Domains binding patterns (@x\@p@), @let@s, or carrying leftover
   -- hiding/relevance wrappers are not supported.
   unless (all (either plainDom plainTBind) dom) $

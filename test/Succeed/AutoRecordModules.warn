@@ -1,5 +1,5 @@
-AutoRecordModules.agda:87.1-4: warning: -W[no]NoRecordModuleSynonym
-No module synonym was generated for _⊗_, because operator names
-cannot be used as module names
+AutoRecordModules.agda:95.1-7: warning: -W[no]NoRecordModuleSynonym
+No module synonym was generated for viaIrr, because its type has a
+domain this feature does not understand
 when scope checking the declaration
-  _⊗_ : Magma → Magma → Magma
+  viaIrr : .Magma → Magma
