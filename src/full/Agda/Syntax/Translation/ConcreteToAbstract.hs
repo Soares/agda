@@ -3570,8 +3570,10 @@ instance ToAbstract C.Clause where
     -- give rise to module synonyms (--auto-record-modules), routed
     -- through the (possibly implicit) where module so that they are in
     -- scope in the right hand side and in with/rewrite expressions.
+    let eqnAnns = concat
+          [ patternAscriptions p' | LeftLet pes <- eqs, (p', _) <- List1.toList pes ]
     anns <- ifM (optAutoRecordModules <$> pragmaOptions)
-      (filterM (recordHeadedType . snd) $ patternAscriptions p)
+      (filterM (recordHeadedType . snd) $ patternAscriptions p ++ eqnAnns)
       (return [])
     vars1 <- getLocalVars
     eqs <- mapM (toAbstractCtx TopCtx) eqs

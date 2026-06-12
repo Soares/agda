@@ -179,3 +179,13 @@ viaHid = M
 
 useViaHid : viaHid.Carrier {true} → Nat
 useViaHid _ = 0
+
+-- Ascribed binders in using statements.
+useUsing : (X : Magma) → Magma.Carrier X → Magma.Carrier X
+useUsing X x using (A : Magma) ← X = x A.∘ x
+
+useUsingWhere : (X : Magma) → Magma.Carrier X → Magma.Carrier X
+useUsingWhere X x using (A : Magma) ← X = twice
+  where
+    twice : Magma.Carrier A
+    twice = x A.∘ x
