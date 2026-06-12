@@ -1451,14 +1451,19 @@ scopeCheckModule r e x qm tel checkDs = do
   -- This is important for Nicolas Pouillard's open parametrized modules
   -- statements inside telescopes.
   res <- withLocalVars $ do
+    let ctel = tel
     tel <- toAbstract (GenTel tel)
     withCurrentModule qm $ do
       -- pushScope m
       -- qm <- getCurrentModule
       printScope "module" 40 $ "inside module " ++ prettyShow x
+      -- Auto record module synonyms for the module parameters
+      -- (--auto-record-modules).
+      syns <- catMaybes <$> forM (telParamsWithTypes ctel)
+        (\ (n, ty) -> autoRecordModuleSynonym PublicAccess n ty)
       ds    <- checkDs
       scope <- getScope
-      return (scope, A.Section r e (qm `withRangesOfQ` x) tel ds)
+      return (scope, A.Section r e (qm `withRangesOfQ` x) tel (syns ++ ds))
 
   -- Binding is done by the caller
   printScope "module" 40 $ "after module " ++ prettyShow x
@@ -1949,7 +1954,8 @@ instance ToAbstract NiceDeclaration where
       (y, decl) <- toAbstractNiceAxiom AxiomName d
       checkAllowedAxiom rel y
       -- check the postulate
-      return $ singleton decl
+      mdecl <- autoRecordModuleSynonym p x t
+      return $ decl : maybeToList mdecl
 
     C.NiceGeneralize r p i tac x t -> do
       reportSLn "scope.decl" 30 $ "found nice generalize: " ++ prettyShow x
@@ -2011,7 +2017,9 @@ instance ToAbstract NiceDeclaration where
   -- Type signatures
     C.FunSig r p a i m rel _ _ x t -> do
         let kind = if m == MacroDef then MacroName else FunName
-        singleton . snd <$> toAbstractNiceAxiom kind (C.Axiom r p a i rel x t)
+        (_y, decl) <- toAbstractNiceAxiom kind (C.Axiom r p a i rel x t)
+        mdecl <- autoRecordModuleSynonym p x t
+        return $ decl : maybeToList mdecl
 
   -- Function definitions
     C.FunDef r ds a i _ _ x cs -> do
@@ -2713,6 +2721,159 @@ toAbstractNiceAxiom kind (C.Axiom r p a i info x t) = do
   definfo <- updateDefInfoOpacity $ mkDefInfoInstance x f p a i isMacro r
   return (y, A.Axiom kind definfo info mp y t')
 toAbstractNiceAxiom _ _ = __IMPOSSIBLE__
+
+-- | Automatic record module synonyms (@--auto-record-modules@).
+--
+--   Given a type signature @x : Δ → R ps@ whose target is syntactically
+--   headed by a record type @R@, generate and scope-check the module
+--   synonym @module x Δ = R ps (x Δ)@, as if the user had written it
+--   directly after the signature.
+--
+--   The analysis is purely syntactic: the target head must literally be
+--   a name that resolves to a record type in scope.  In particular,
+--   type aliases unfolding to record types and targets headed by infix
+--   operators (e.g. @X × Y@) are not recognized; in such cases (and any
+--   other we do not understand) we silently generate nothing.
+-- | The named parameters of a concrete telescope, with their types.
+--   Used to generate record module synonyms for module parameters.
+telParamsWithTypes :: C.Telescope -> [(C.Name, C.Expr)]
+telParamsWithTypes tel =
+  [ (C.boundName $ C.binderName b, ty)
+  | C.TBind _ xs ty <- tel
+  , Arg _ (Named _ b) <- List1.toList xs
+  , isNothing (C.binderPattern b)
+  , not $ isNoName $ C.boundName $ C.binderName b
+  ]
+
+autoRecordModuleSynonym :: Access -> C.Name -> C.Expr -> ScopeM (Maybe A.Declaration)
+autoRecordModuleSynonym p x t = runMaybeT $ do
+  guardM $ lift $ optAutoRecordModules <$> pragmaOptions
+  -- The synonym needs a plain module name: skip operators and @_@.
+  guard $ not (isNoName x) && not (C.isOperator x)
+  let (dom, target) = peelDomains t
+  -- Domains binding patterns (@x\@p@) or @let@s are not supported.
+  guard $ all (either (const True) plainTBind) dom
+  (hd, _ps) <- targetParts target
+  -- A domain binder must not shadow the head of the target.
+  let userNames = concatMap (either (const []) tbindNames) dom
+  case hd of
+    C.QName h -> guard $ h `notElem` userNames
+    C.Qual{}  -> pure ()
+  -- The head must resolve to a record type.
+  lift (resolveName hd) >>= \case
+    DefinedName _ d _ | anameKind d == RecName -> pure ()
+    _ -> mzero
+  -- Invent names for anonymous domains.
+  (tel, vars) <- lift $ nameDomains userNames dom
+  -- The module application @R (x Δ)@.  The record parameters are all
+  -- hidden in the record module's telescope, so we do not pass them;
+  -- they are solved by unification against the type of @x Δ@.
+  let modapp = C.SectionApp (getRange t) tel hd [selfApp vars]
+  lift $ checkModuleMacro Apply TopOpenModule (getRange x) p defaultErased x
+           modapp DontOpen defaultImportDir
+  where
+    -- Split a concrete type into its domains and target.
+    -- The niceifier wraps signature types in 'C.Generalized'; if any
+    -- generalizable variables actually occur in the type, the
+    -- generated module application will not see the inserted binders
+    -- and will likely fail to check, but for the common case of no
+    -- generalization the wrapper is just noise.
+    peelDomains :: C.Expr -> ([Either (Arg C.Expr) C.TypedBinding], C.Expr)
+    peelDomains = \case
+      C.Generalized e -> peelDomains e
+      C.Pi tel b      -> first (map Right (List1.toList tel) ++) $ peelDomains b
+      C.Fun _ a b     -> first (Left a :) $ peelDomains b
+      e               -> ([], e)
+
+    plainTBind :: C.TypedBinding -> Bool
+    plainTBind = \case
+      C.TBind _ xs _ -> all (isNothing . C.binderPattern . namedArg) xs
+      C.TLet{}       -> False
+
+    tbindNames :: C.TypedBinding -> [C.Name]
+    tbindNames = \case
+      C.TBind _ xs _ -> map (C.boundName . C.binderName . namedArg) $ List1.toList xs
+      C.TLet{}       -> []
+
+    -- Decompose the target into its head and the (raw) arguments.
+    -- Re-parsing the raw application tells us whether the head is
+    -- captured by an infix operator (in which case we give up).
+    targetParts :: C.Expr -> MaybeT ScopeM (C.QName, [C.Expr])
+    targetParts = \case
+      C.Ident q   -> pure (q, [])
+      C.Paren _ e -> targetParts e
+      C.RawApp _ es@(List2 e1 e2 rest)
+        | C.Ident q <- e1 -> do
+            parsed <- MaybeT $ (Just <$> parseApplication es)
+                        `catchError` \ _ -> pure Nothing
+            case appHead parsed of
+              Just q' | q' == q -> pure (q, e2 : rest)
+              _                 -> mzero
+      _ -> mzero
+
+    appHead :: C.Expr -> Maybe C.QName
+    appHead = \case
+      C.App _ f _ -> appHead f
+      C.Paren _ e -> appHead e
+      C.Ident q   -> Just q
+      _           -> Nothing
+
+    -- Turn the domains into a module telescope, naming anonymous ones,
+    -- and return the variables to apply @x@ to.
+    nameDomains
+      :: [C.Name] -> [Either (Arg C.Expr) C.TypedBinding]
+      -> ScopeM (C.Telescope, [NamedArg C.Name])
+    nameDomains _ [] = return ([], [])
+    nameDomains avoid (Left (Arg ai ty) : ds) = do
+      n <- freshAvoiding (getRange ty) avoid
+      let tb = C.TBind (getRange ty) (singleton $ Arg ai $ unnamed $ C.mkBinder_ n) ty
+      (tel, vs) <- nameDomains (n : avoid) ds
+      return (tb : tel, Arg ai (unnamed n) : vs)
+    nameDomains avoid (Right (C.TBind r xs ty) : ds) = do
+      (avoid', xsvs) <- nameBinders avoid $ List1.toList xs
+      let (xs', vs) = unzip xsvs
+      (tel, vss) <- nameDomains avoid' ds
+      case xs' of
+        b : bs -> return (C.TBind r (b :| bs) ty : tel, vs ++ vss)
+        []     -> __IMPOSSIBLE__
+    nameDomains _ (Right C.TLet{} : _) = __IMPOSSIBLE__  -- excluded by plainTBind
+
+    nameBinders
+      :: [C.Name] -> [NamedArg C.Binder]
+      -> ScopeM ([C.Name], [(NamedArg C.Binder, NamedArg C.Name)])
+    nameBinders avoid [] = return (avoid, [])
+    nameBinders avoid (Arg ai (Named nm b) : bs)
+      | isNoName (C.boundName $ C.binderName b) = do
+          n <- freshAvoiding (getRange b) avoid
+          let b' = b { C.binderName = C.mkBoundName_ n }
+          (avoid', rest) <- nameBinders (n : avoid) bs
+          return (avoid', (Arg ai (Named nm b'), Arg ai (Named nm n)) : rest)
+      | otherwise = do
+          let n = C.boundName $ C.binderName b
+          (avoid', rest) <- nameBinders avoid bs
+          return (avoid', (Arg ai (Named nm b), Arg ai (Named nm n)) : rest)
+
+    -- A fresh name that is neither in scope nor in @avoid@.
+    freshAvoiding :: Range -> [C.Name] -> ScopeM C.Name
+    freshAvoiding r avoid = loop 0
+      where
+        loop i = do
+          n <- freshConcreteName r i "z"
+          if n `elem` avoid then loop (i + 1) else return n
+
+    -- The expression @(x Δ)@ (or just @x@ for an empty telescope).
+    selfApp :: [NamedArg C.Name] -> C.Expr
+    selfApp vars = case map mkArg vars of
+      []     -> hd0
+      a : as -> C.Paren noRange $ C.RawApp noRange $ List2 hd0 a as
+      where
+        hd0 = C.Ident $ C.QName x
+        mkArg (Arg ai (Named nm n)) =
+          let v = C.Ident $ C.QName n in
+          case getHiding ai of
+            Hidden     -> C.HiddenArg   noRange $ Named nm v
+            Instance{} -> C.InstanceArg noRange $ Named nm v
+            NotHidden  -> v
 
 -- | Check that the name is allowed to be postulated: either we are in a
 -- builtin module, we are not in safe mode, or the axiom comes from a

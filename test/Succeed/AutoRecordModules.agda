@@ -1,0 +1,102 @@
+{-# OPTIONS --auto-record-modules #-}
+
+module AutoRecordModules where
+
+open import Agda.Builtin.Nat
+open import Agda.Builtin.Bool
+
+record Magma : Set₁ where
+  field
+    Carrier : Set
+    _∘_     : Carrier → Carrier → Carrier
+
+-- A direct definition of record type gets a module synonym.
+M : Magma
+M = record { Carrier = Nat ; _∘_ = _+_ }
+
+five : M.Carrier
+five = 2 M.∘ 3
+
+-- An indexed family of records: the synonym is parameterized,
+-- as if defined by  module F (b : Bool) = Magma (F b).
+F : Bool → Magma
+F true  = M
+F false = M
+
+six : F.Carrier true
+six = F._∘_ true 4 2
+
+-- Implicit domains.
+G : {b : Bool} → Magma
+G {b} = F b
+
+seven : G.Carrier {true}
+seven = G._∘_ {true} 3 4
+
+-- Unnamed domains get invented binder names.
+H : Bool → Magma
+H _ = M
+
+eight : H.Carrier true
+eight = H._∘_ true 4 4
+
+-- Postulates get a synonym, too.
+postulate
+  P : Magma
+
+p-test : P.Carrier → P.Carrier
+p-test x = x P.∘ x
+
+-- Parameterized records: the parameters are taken from the target.
+record Pointed (A : Set) : Set where
+  field point : A
+
+Q : Pointed Nat
+Q = record { point = 0 }
+
+zero' : Nat
+zero' = Q.point
+
+-- Using the synonym already between signature and definition
+-- (one mutual block).
+K : Magma
+ten : K.Carrier
+K = M
+ten = 10
+
+-- `open` on the generated module.
+open M renaming (_∘_ to _⊕_)
+
+nine : Nat
+nine = 4 ⊕ 5
+
+-- Non-field definitions in the record module are copied as well.
+record WithDefs : Set₁ where
+  field A : Set
+  Twice : Set
+  Twice = A → A
+
+W : WithDefs
+W = record { A = Nat }
+
+idTwice : W.Twice
+idTwice x = x
+
+-- Operator-named definitions are skipped (no module synonym is
+-- generated), but must not crash the feature.
+_⊗_ : Magma → Magma → Magma
+x ⊗ y = x
+
+-- Module parameters of record type get a synonym inside the module.
+module WithParam (X : Magma) where
+  double : X.Carrier → X.Carrier
+  double x = x X.∘ x
+
+-- Instantiating the parameterized module uses the synonym's copies.
+fourteen : Nat
+fourteen = WithParam.double M 7
+
+-- Parameterized module parameter with a function type.
+module FamParam (Y : Bool → Magma) where
+  use : (b : Bool) → Y.Carrier b → Y.Carrier b
+  use b y = Y._∘_ b y y
