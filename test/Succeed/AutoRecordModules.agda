@@ -153,3 +153,21 @@ mkPair : Magma → Pair
 mkPair (A : Magma) .Pair.fst = A
 mkPair (A : Magma) .Pair.snd = record
   { Carrier = A.Carrier ; _∘_ = A._∘_ }
+
+-- Unnamed instance and hidden function-space domains (their hiding
+-- lives in a wrapper expression, not the ArgInfo; issue found
+-- dogfooding in WildBracket's Shim.agda).
+record HasMagma : Set₁ where
+  field theMagma : Magma
+
+viaInst : {{HasMagma}} → Magma
+viaInst {{h}} = HasMagma.theMagma h
+
+useViaInst : {{h : HasMagma}} → viaInst.Carrier → viaInst.Carrier
+useViaInst x = x viaInst.∘ x
+
+viaHid : {Bool} → Magma
+viaHid = M
+
+useViaHid : viaHid.Carrier {true} → Nat
+useViaHid _ = 0

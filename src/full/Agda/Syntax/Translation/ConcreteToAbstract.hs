@@ -2770,8 +2770,26 @@ peelDomains :: C.Expr -> ([Either (Arg C.Expr) C.TypedBinding], C.Expr)
 peelDomains = \case
   C.Generalized e -> peelDomains e
   C.Pi tel b      -> first (map Right (List1.toList tel) ++) $ peelDomains b
-  C.Fun _ a b     -> first (Left a :) $ peelDomains b
+  C.Fun _ a b     -> first (Left (normalizeDom a) :) $ peelDomains b
   e               -> ([], e)
+  where
+    -- A 'C.Fun' domain carries hiding as a wrapper expression rather
+    -- than in the 'ArgInfo'; move it to the 'ArgInfo'.
+    normalizeDom :: Arg C.Expr -> Arg C.Expr
+    normalizeDom (Arg ai e) = case e of
+      C.HiddenArg _ (Named Nothing e')   -> Arg (setHiding Hidden ai) e'
+      C.InstanceArg _ (Named Nothing e') -> Arg (setHiding (Instance NoOverlap) ai) e'
+      _                                  -> Arg ai e
+
+-- | Domains we know how to turn into a module telescope binding:
+--   no leftover hiding wrappers and no irrelevance dots.
+plainDom :: Arg C.Expr -> Bool
+plainDom (Arg _ e) = case e of
+  C.HiddenArg{}   -> False
+  C.InstanceArg{} -> False
+  C.Dot{}         -> False
+  C.DoubleDot{}   -> False
+  _               -> True
 
 plainTBind :: C.TypedBinding -> Bool
 plainTBind = \case
@@ -2837,8 +2855,9 @@ autoRecordModuleSynonym' apply kind p x t = runMaybeT $ do
   -- The synonym needs a plain module name: skip operators and @_@.
   guard $ not (isNoName x) && not (C.isOperator x)
   let (dom, target) = peelDomains t
-  -- Domains binding patterns (@x\@p@) or @let@s are not supported.
-  guard $ all (either (const True) plainTBind) dom
+  -- Domains binding patterns (@x\@p@), @let@s, or carrying leftover
+  -- hiding/relevance wrappers are not supported.
+  guard $ all (either plainDom plainTBind) dom
   (hd, _ps) <- targetParts target
   -- A domain binder must not shadow the head of the target.
   let userNames = concatMap (either (const []) tbindNames) dom
