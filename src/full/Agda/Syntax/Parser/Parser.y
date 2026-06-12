@@ -1209,7 +1209,52 @@ CommaImportNames1
 -- A left hand side of a function clause. We parse it as an expression, and
 -- then check that it is a valid left hand side.
 LHS :: { [RewriteEqn] -> [WithExpr] -> LHS }
-LHS : Expr1_P(NoRecordUpdate) {% exprToLHS $1 }
+LHS : LHSExpr1 {% exprToLHS $1 }
+
+-- LHS expressions: a copy of the Expr1_P(NoRecordUpdate) hierarchy
+-- that additionally allows type-ascribed binders @(x y : T)@ as
+-- application atoms.  Ascriptions cannot be allowed in general
+-- expressions: after @'(' TBindWithHiding ')'@ an LALR(1) parser
+-- cannot know whether a telescope follows (Pi type) or not
+-- (ascription atom); only in LHS spines no telescope can occur.
+LHSExpr1 :: { Expr }
+LHSExpr1
+  : LHSWithExprs
+      {% case $1 of
+           { e :| []      -> return e
+           ; e :| e1 : es -> return $ WithApp (getRange (e, e1, es)) e (e1 :| es)
+           }
+      }
+
+LHSWithExprs :: { List1 Expr }
+LHSWithExprs
+  : LHSApplication3 '|' UnnamedWithExprs { (rawApp $1) <| $3 }
+  | LHSApplication                       { singleton (rawApp $1) }
+
+LHSApplication :: { List1 Expr }
+LHSApplication
+    : Expr2_P(NoRecordUpdate)                   { singleton $1 }
+    | LHSAtom_P(NoRecordUpdate) LHSApplicationR { $1 <| $2 }
+
+-- Like 'Application', but allowing ascription atoms.
+LHSApplicationR :: { List1 Expr }
+LHSApplicationR
+    : Expr2_P(RecordUpdate)                  { singleton $1 }
+    | LHSAtom_P(RecordUpdate) LHSApplicationR { $1 <| $2 }
+
+LHSApplication3 :: { List1 Expr }
+LHSApplication3
+    : LHSAtom_P(NoRecordUpdate)                  { singleton $1 }
+    | LHSAtom_P(NoRecordUpdate) LHSApplication3R { $1 <| $2 }
+
+LHSApplication3R :: { List1 Expr }
+LHSApplication3R
+    : LHSAtom_P(RecordUpdate)                  { singleton $1 }
+    | LHSAtom_P(RecordUpdate) LHSApplication3R { $1 <| $2 }
+
+LHSAtom_P(recordUpdate)
+    : Expr3_P(recordUpdate)   { $1 }
+    | '(' TBindWithHiding ')' {% parseError "Type-ascribed patterns are not yet implemented" }
 
 -- Parsing either an expression @e@ or a @(rewrite | with p <-) e1 | ... | en@.
 HoleContent :: { HoleContent }
