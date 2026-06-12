@@ -512,9 +512,7 @@ mkAscriptions r (TBind _ xs t) = traverse go xs
           "Hidden binders are not allowed in type-ascribed patterns"
       | isJust nm = parseErrorRange r
           "Named binders are not allowed in type-ascribed patterns"
-      | isJust (binderPattern b) = parseErrorRange r
-          "Pattern binders in type-ascribed patterns are not yet implemented"
-      | otherwise = pure $ Ann r (boundName $ binderName b) t
+      | otherwise = pure $ Ann r b t
 mkAscriptions r TLet{} = parseErrorRange r "Expected a typed binding"
 
 -- | Turn an expression into a name. Fails if the expression is not a

@@ -199,8 +199,8 @@ data Expr
   | DontCare Expr                              -- ^ to print irrelevant things
   | Equal Range Expr Expr                      -- ^ ex: @a = b@, used internally in the parser
   | Ellipsis Range                             -- ^ @...@, used internally to parse patterns.
-  | Ann Range Name Expr                        -- ^ ex: @(x : T)@ in a LHS: type-ascribed
-                                               --   pattern variable; used internally in the
+  | Ann Range Binder Expr                      -- ^ ex: @(x : T)@ in a LHS: type-ascribed
+                                               --   pattern binder; used internally in the
                                                --   parser, becomes 'AnnP'.
   | KnownIdent Aspects QName
     -- ^ An identifier coming from abstract syntax, for which we know a
@@ -257,7 +257,7 @@ data Pattern
                                            --   Second arg is @Nothing@ before expansion, and
                                            --   @Just p@ after expanding ellipsis to @p@.
   | WithP Range Pattern                    -- ^ @| p@, for with-patterns.
-  | AnnP Range Name Expr                   -- ^ @(x : T)@, a type-ascribed pattern variable.
+  | AnnP Range Binder Expr                 -- ^ @(x : T)@, a type-ascribed pattern binder.
   deriving Eq
 
 -- | Can a dot pattern be interpreted as projection pattern?

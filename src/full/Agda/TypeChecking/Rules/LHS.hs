@@ -206,6 +206,12 @@ updateProblemEqs eqs = do
     update eq@(ProblemEq p@A.ProjP{} _ _) = typeError $ IllformedProjectionPatternAbstract p
     update eq@(ProblemEq p@(A.AsP info x p') v a) =
       (ProblemEq (A.VarP x) v a :) <$> update (ProblemEq p' v a)
+    update eq@(ProblemEq (A.AnnP info e p') v a) =
+      -- Keep the annotation as its own marker equation (around a
+      -- wildcard) and decompose the sub-pattern, so that e.g. an
+      -- ascribed constructor pattern is properly consumed by the
+      -- split.
+      (ProblemEq (A.AnnP info e (A.WildP empty)) v a :) <$> update (ProblemEq p' v a)
 
     update eq@(ProblemEq p v a) = reduce v >>= constructorForm >>= \case
       Con c ci es -> do
@@ -494,7 +500,7 @@ transferOrigins ps qs = do
     patOrig A.AbsurdP{}     = PatOAbsurd
     patOrig A.LitP{}        = PatOLit
     patOrig A.EqualP{}      = PatOCon --TODO: origin for EqualP
-    patOrig (A.AnnP _ _ p)  = patOrig p
+    patOrig (A.AnnP _ _ p)  = patOrig $ snd $ asView p
     patOrig A.AsP{}         = __IMPOSSIBLE__
     patOrig A.ProjP{}       = __IMPOSSIBLE__
     patOrig A.DefP{}        = __IMPOSSIBLE__

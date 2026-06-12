@@ -1632,8 +1632,8 @@ instance ToConcrete A.Pattern where
       A.AnnP i e p -> do
         e <- toConcreteCtx TopCtx e
         toConcrete p <&> \case
-          C.IdentP _ (C.QName x) -> C.AnnP (getRange i) x e
-          C.WildP r              -> C.AnnP (getRange i) (C.noName r) e
+          C.IdentP _ (C.QName x) -> C.AnnP (getRange i) (C.mkBinder_ x) e
+          C.WildP r              -> C.AnnP (getRange i) (C.mkBinder_ (C.noName r)) e
           c                      -> c
 
     where

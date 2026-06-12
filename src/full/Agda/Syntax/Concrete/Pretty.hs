@@ -195,7 +195,7 @@ instance Pretty Expr where
             -- Andreas, 2011-10-03 print irrelevant things as .(e)
             DontCare e -> hlSymbol "." <> parens (pretty e)
             Equal _ a b -> pretty a <+> equals <+> pretty b
-            Ann _ x e -> parens $ sep [pretty x, colon, pretty e]
+            Ann _ b e -> parens $ sep [pretty b, colon, pretty e]
             Ellipsis _  -> hlSymbol "..."
             Generalized e -> pretty e
             Highlighted a e -> annotate a (pretty e)
@@ -621,7 +621,7 @@ instance Pretty Pattern where
             EqualP _ es     -> sep $ for es \ (e1, e2) -> parens $ sep [pretty e1, equals, pretty e2]
             EllipsisP _ _   -> "..."
             WithP _ p       -> "|" <+> pretty p
-            AnnP _ x e      -> parens $ sep [pretty x, ":", pretty e]
+            AnnP _ b e      -> parens $ sep [pretty b, ":", pretty e]
 
 prettyOpApp :: forall a .
   Pretty a => Asp.Aspects -> QName -> List1 (NamedArg (MaybePlaceholder a)) -> [Doc]

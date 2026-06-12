@@ -38,3 +38,13 @@ record Pair : Set where
 mkPair : Nat → Pair
 mkPair (n : Nat) .Pair.fst = n
 mkPair (n : Nat) .Pair.snd = suc n
+
+-- Bare-pattern ascriptions: an ascribed parenthesized pattern matches.
+constrMatch : Nat → Nat
+constrMatch ((suc n) : Nat) = n
+constrMatch ((zero)  : Nat) = zero
+
+-- As-binders in ascriptions.
+asMatch : Nat → Nat
+asMatch (m@(suc n) : Nat) = m + n
+asMatch (z@zero    : Nat) = z

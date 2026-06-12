@@ -4017,16 +4017,26 @@ instance ToAbstract CPattern where
     C.RecP kwr r fs -> A.RecP kwr (ConPatInfo ConORec (PatRange r) ConPatEager) <$> mapM (traverse $ toAbstract . wrap) fs
     C.WithP r p -> A.WithP (PatRange r) <$> toAbstract p  -- not in DISPLAY pragma
 
-    -- Type-ascribed pattern variable @(x : ty)@: the name always binds
-    -- a variable (binder semantics, like lambda binders), and the type
-    -- is checked against the domain by the LHS type checker.  The type
-    -- expression is translated in the second pattern phase, together
-    -- with the dot patterns, so it may refer to pattern variables.
-    C.AnnP r x ty
-      | isNoName x -> return $ A.AnnP (PatRange r) ty $ A.WildP $ PatRange $ getRange x
-      | otherwise  -> do
-          y <- bindPatternVariable NotHidden x
-          return $ A.AnnP (PatRange r) ty $ A.VarP $ A.mkBindName y
+    -- Type-ascribed pattern binder @(x : ty)@, @(x@p : ty)@ or
+    -- @((p) : ty)@: a name always binds a variable (binder semantics,
+    -- like lambda binders), and the type is checked against the domain
+    -- by the LHS type checker.  The type expression is translated in
+    -- the second pattern phase, together with the dot patterns, so it
+    -- may refer to pattern variables.
+    C.AnnP r b ty -> do
+      let x = C.boundName $ C.binderName b
+      case C.binderPattern b of
+        Nothing
+          | isNoName x -> return $ A.AnnP (PatRange r) ty $ A.WildP $ PatRange $ getRange x
+          | otherwise  -> do
+              y <- bindPatternVariable NotHidden x
+              return $ A.AnnP (PatRange r) ty $ A.VarP $ A.mkBindName y
+        Just rawp -> do
+          -- The binder pattern has not been operator-parsed: the whole
+          -- ascription is an atom for the pattern operator parser.
+          p <- parsePattern rawp
+          let p' = applyUnless (isNoName x) (C.AsP r x) p
+          A.AnnP (PatRange r) ty <$> toAbstract (wrap p')
 
     where
       -- Pass on @displayLhs@ context
