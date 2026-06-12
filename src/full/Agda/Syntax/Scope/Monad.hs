@@ -570,6 +570,17 @@ bindQModule acc q m = do
 setRecordConstructor :: A.QName -> (A.QName, Maybe Induction) -> ScopeM ()
 setRecordConstructor recr con = modifyScope $ over scopeRecords $ Map.insert recr con
 
+-- | Remember the concrete parameters of a record signature, so that the
+--   record definition can recover the parameter types
+--   (for @--auto-record-modules@).
+setSigParams :: A.QName -> C.Parameters -> ScopeM ()
+setSigParams x ps = modifyScope $ over scopeSigParams $ Map.insert x ps
+
+-- | Retrieve the concrete parameters of a record signature
+--   (for @--auto-record-modules@).
+getSigParams :: A.QName -> ScopeM (Maybe C.Parameters)
+getSigParams x = Map.lookup x <$> useScope scopeSigParams
+
 -- | Get the internal 'QName' for the  name of a record constructor. If
 -- the name does not refer to a record type, 'Nothing' is returned.
 getRecordConstructor :: ReadTCState m => A.QName -> m (Maybe (A.QName, Maybe Induction))

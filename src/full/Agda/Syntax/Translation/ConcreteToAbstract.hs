@@ -134,15 +134,15 @@ notAValidLetBinding = locatedTypeError NotAValidLetBinding
     Helpers
  --------------------------------------------------------------------------}
 
-newtype RecordConstructorType = RecordConstructorType [C.Declaration]
+data RecordConstructorType = RecordConstructorType [(C.Name, C.Expr)] [C.Declaration]
 
 instance ToAbstract RecordConstructorType where
   type AbsOfCon RecordConstructorType = A.Expr
-  toAbstract (RecordConstructorType ds) = recordConstructorType ds
+  toAbstract (RecordConstructorType params ds) = recordConstructorType params ds
 
 -- | Compute the type of the record constructor (with bogus target type)
-recordConstructorType :: [C.Declaration] -> ScopeM A.Expr
-recordConstructorType decls =
+recordConstructorType :: [(C.Name, C.Expr)] -> [C.Declaration] -> ScopeM A.Expr
+recordConstructorType params decls =
     -- Nicify all declarations since there might be fixity declarations after
     -- the the last field. Use NoWarn to silence fixity warnings. We'll get
     -- them again when scope checking the declarations to build the record
@@ -162,22 +162,34 @@ recordConstructorType decls =
       -- Andreas, 2022-10-06, issue #6165:
       -- The dummy was builtinSet, but this might not be defined yet.
       let dummy = A.Lit empty $ LitString "TYPE"
-      tel   <- catMaybes <$> mapM makeBinding ds
-      return $ A.mkPi (ExprRange (getRange ds)) tel dummy
+      -- Let-bound record module synonyms for the record parameters
+      -- (--auto-record-modules), in scope in the field types.
+      -- Quiet: the record signature already warned about parameters
+      -- we do not understand.
+      syns  <- forMaybeM params \ (x, ty) ->
+        fmap (A.TLet (getRange x) . singleton) <$> autoRecordLetSynonymQuiet x ty
+      tel   <- concat <$> mapM makeBinding ds
+      return $ A.mkPi (ExprRange (getRange ds)) (syns ++ tel) dummy
 
-    makeBinding :: C.NiceDeclaration -> ScopeM (Maybe A.TypedBinding)
+    makeBinding :: C.NiceDeclaration -> ScopeM [A.TypedBinding]
     makeBinding d = do
       let failure = typeError $ NotValidBeforeField d
           r       = getRange d
-          mkLet :: C.NiceDeclaration -> ScopeM (Maybe A.TypedBinding)
-          mkLet d = Just . A.TLet r <$> scopeCheckLetDef RecordLetDef d
+          mkLet :: C.NiceDeclaration -> ScopeM [A.TypedBinding]
+          mkLet d = (:[]) . A.TLet r <$> scopeCheckLetDef RecordLetDef d
       setCurrentRange r $ case d of
 
         C.NiceField r pr ab inst tac x (Arg ai t) -> do
           fx  <- getConcreteFixity x
           ai  <- checkFieldArgInfo True ai
           let bv = Arg ai $ unnamed $ C.mkBinder $ (C.mkBoundName x fx) { bnameTactic = tac }
-          toAbstract $ C.TBind r (singleton bv) t
+          tb  <- toAbstract $ C.TBind r (singleton bv) t
+          -- Let-bound module synonym for a record-headed field
+          -- (--auto-record-modules), in scope in the later field types.
+          -- Quiet: the second pass over the fields warns.
+          syn <- autoRecordFieldSynonym QuietNoSynonym ai x t $
+            fmap (A.TLet r . singleton) <$> autoRecordLetSynonymQuiet x t
+          return $ maybeToList tb ++ maybeToList syn
 
         -- Public open is allowed and will take effect when scope checking as
         -- proper declarations.
@@ -1503,9 +1515,10 @@ scopeCheckModule r e x qm tel checkDs = do
       -- qm <- getCurrentModule
       printScope "module" 40 $ "inside module " ++ prettyShow x
       -- Auto record module synonyms for the module parameters
-      -- (--auto-record-modules).
+      -- (--auto-record-modules).  Private: the parameters themselves
+      -- are not part of the module's public interface either.
       syns <- catMaybes <$> forM (telParamsWithTypes ctel)
-        (\ (n, ty) -> autoRecordModuleSynonym PublicAccess n ty)
+        (\ (n, ty) -> autoRecordModuleSynonym privateAccessInserted n ty)
       ds    <- checkDs
       scope <- getScope
       return (scope, A.Section r e (qm `withRangesOfQ` x) tel (syns ++ ds))
@@ -2030,7 +2043,8 @@ instance ToAbstract NiceDeclaration where
       -- all question marks to underscores.  (See issue 1138.)
       let maskIP (C.QuestionMark r _) = C.Underscore r Nothing
           maskIP e                     = e
-      t  <- toAbstractCtx TopCtx $ mapExpr maskIP t
+          ct = mapExpr maskIP t
+      t  <- toAbstractCtx TopCtx ct
       f  <- getConcreteFixity x
       y  <- freshAbstractQName f x
       -- Andreas, 2018-06-09 issue #2170
@@ -2043,7 +2057,10 @@ instance ToAbstract NiceDeclaration where
       --   -- Ulf: unless you turn on --irrelevant-projections
       bindName' p FldName (instanceMetadata i) x y
       let info = (mkDefInfoInstance x f p a i NotMacroDef r) { defTactic = tac }
-      return $ singleton $ A.Field info y (Arg ai t)
+      -- Module synonym for a record-headed field
+      -- (--auto-record-modules), as public as the field itself.
+      msyn <- autoRecordFieldSynonym WarnNoSynonym ai x ct $ autoRecordModuleSynonym p x ct
+      return $ A.Field info y (Arg ai t) : maybeToList msyn
 
   -- Primitive function
     PrimitiveFunction r p a x t -> notAffectedByOpaque $ do
@@ -2386,11 +2403,15 @@ scopeCheckDataOrRecSig ::
         -- ^ The resulting data or record signature in abstract syntax.
 scopeCheckDataOrRecSig dataOrRec r er p a pc uc x ls t = do
   ensureNoLetStms ls
-  withLocalVars $ do
-    (ls', t') <- withCheckNoShadowing do
+  -- 'localScope' also contains the bindings of the let-bound module
+  -- synonyms generated for record-headed parameters
+  -- (--auto-record-modules); only the telescope variables would be
+  -- restored by 'withLocalVars'.  The name of the data or record type
+  -- is bound after, outside the 'localScope'.
+  (ls', t') <- localScope $ withCheckNoShadowing do
       case dataOrRec of
         IsData -> do
-          (,) <$> toAbstract (GenTel $ map makeDomainFull ls)
+          (,) <$> toAbstract (GenTelSyn $ map makeDomainFull ls)
               <*> toAbstract (C.Generalized t)
         IsRecord _ -> do
           -- Minor hack: record types don't have indices so we include t when
@@ -2398,6 +2419,7 @@ scopeCheckDataOrRecSig dataOrRec r er p a pc uc x ls t = do
           -- generalizable arguments in the sort should be bound variables.
           (,) <$> (fst <$> toAbstract (GenTelAndType (map makeDomainFull ls) t))
               <*> toAbstract t
+  do
     f  <- getConcreteFixity x
     x' <- freshAbstractQName f x
     mErr <- bindName'' p namekind (generalizedVarsMetadata $ generalizeTelVars ls') x x'
@@ -2415,6 +2437,11 @@ scopeCheckDataOrRecSig dataOrRec r er p a pc uc x ls t = do
             typeError $ ClashingDefinition cn an (Just suggestion)
           _ -> typeError err
       otherErr -> typeError otherErr
+    -- Remember the concrete parameters of a data or record signature,
+    -- so that the definition can recover the parameter types when
+    -- generating record module synonyms (--auto-record-modules).
+    whenM (optAutoRecordModules <$> pragmaOptions) $
+      setSigParams x' ls
     return $ mkSig (mkDefInfo x f p a r) er x' ls' t'
   where
     namekind = case dataOrRec of
@@ -2450,21 +2477,28 @@ scopeCheckDataDef r o a pc uc x pars cons =
   notAffectedByOpaque do
     reportSLn "scope.data.def" 40 ("checking " ++ show o ++ " DataDef for " ++ prettyShow x)
     (p, ax) <- retrieveDataOrRecName IsData x
+    let x' = anameName ax
+
+    -- Recover the parameter types from the data signature, to generate
+    -- record module synonyms for record-typed parameters in the
+    -- constructor types (--auto-record-modules).  Nothing was stored
+    -- unless the flag is on.
+    synParams <- getSigParams x' <&> \case
+      Nothing  -> []
+      Just sig -> alignDefParams (flattenSigParams sig) pars
 
     withLocalVars do
       -- Scope check parameters
       gvars <- bindGeneralizablesIfInserted o ax
       pars <- catMaybes <$> toAbstract (defParametersToParameters pars)
 
-      -- Create the data module
-      let x' = anameName ax
       -- Create the module for the qualified constructors
       let m = qnameToMName x'
       createModule (Just IsDataModule) m
       bindModule p x m  -- make it a proper module
 
       cons <- checkConstructors cons
-      cons <- toAbstract (map (DataConstrDecl m a p) cons)
+      cons <- toAbstract (map (DataConstrDecl m a p synParams) cons)
       printScope "data" 40 $ "Checked data " ++ prettyShow x
       f <- getConcreteFixity x
       return $ A.DataDef (mkDefInfo x f PublicAccess a r) x' pc uc (DataDefParams gvars pars) cons
@@ -2534,6 +2568,14 @@ scopeCheckRecDef r o a pc uc forceEta x directives pars fields =
     (p, ax) <- retrieveDataOrRecName IsRecord_ x
     let x' = anameName ax
 
+    -- Recover the parameter types from the record signature, to
+    -- generate record module synonyms for record-typed parameters
+    -- (--auto-record-modules).  Nothing was stored unless the flag
+    -- is on.
+    synParams <- getSigParams x' <&> \case
+      Nothing  -> []
+      Just sig -> alignDefParams (flattenSigParams sig) pars
+
     -- Preserve the local variable set since we add some generalizable ones.
     withLocalVars $ do
       gvars  <- bindGeneralizablesIfInserted o ax
@@ -2541,7 +2583,7 @@ scopeCheckRecDef r o a pc uc forceEta x directives pars fields =
 
       -- We scope check the fields a first time when putting together
       -- the type of the constructor.
-      contel <- localToAbstract (RecordConstructorType fields) return
+      contel <- localToAbstract (RecordConstructorType synParams fields) return
 
       -- Use the name @x'@ of the record type also as name of the new record module.
       let m = qnameToMName x'
@@ -2550,9 +2592,16 @@ scopeCheckRecDef r o a pc uc forceEta x directives pars fields =
 
       -- We scope check the fields a second time, as actual fields.
       afields <- withCurrentModule m $ do
+        -- Record module synonyms for the record parameters
+        -- (--auto-record-modules).  Private: the parameters are not
+        -- part of the record module's public interface either.
+        -- Quiet: the record signature already warned about parameters
+        -- we do not understand.
+        syns <- forMaybeM synParams \ (n, ty) ->
+          autoRecordModuleSynonymQuiet privateAccessInserted n ty
         afields <- scopeCheckDeclarations fields
         printScope "rec" 25 "checked fields"
-        return afields
+        return (syns ++ afields)
 
       -- Andreas, 2017-07-13 issue #2642 disallow duplicate fields
       -- Check for duplicate fields. (See "Check for duplicate constructors")
@@ -2795,6 +2844,29 @@ telParamsWithTypes tel =
   , not $ isNoName $ C.boundName $ C.binderName b
   ]
 
+-- | The parameters of a record signature, flattened to one entry per
+--   bound name.  'C.DomainFree' and pattern binders have no type we
+--   can use for a module synonym.
+flattenSigParams :: C.Parameters -> [(Hiding, Maybe C.Expr)]
+flattenSigParams = concatMap \case
+  C.DomainFree x -> [(getHiding x, Nothing)]
+  C.DomainFull (C.TBind _ xs ty) -> List1.toList xs <&> \ x ->
+    (getHiding x, ty <$ guard (isNothing $ C.binderPattern $ namedArg x))
+  C.DomainFull C.TLet{} -> []
+
+-- | Pair the parameters of a record definition with the types from its
+--   signature.  The definition may omit hidden parameters; on any
+--   binder form we do not understand we conservatively stop producing
+--   pairs (a wrongly paired type would make the generated module
+--   synonym fail to check).
+alignDefParams :: [(Hiding, Maybe C.Expr)] -> C.DefParameters -> [(C.Name, C.Expr)]
+alignDefParams ((sh, mty) : sig) defs0@(WithHiding dh (Named dnm d) : defs)
+  | isJust dnm = []  -- named parameters: give up
+  | sameHiding sh dh =
+      maybe id (\ ty -> ((d, ty) :)) mty $ alignDefParams sig defs
+  | visible dh, notVisible sh = alignDefParams sig defs0
+alignDefParams _ _ = []
+
 -- | Split a concrete type into its domains and target.
 --   The niceifier wraps signature types in 'C.Generalized'; if any
 --   generalizable variables actually occur in the type, the
@@ -2872,20 +2944,55 @@ recordHeadedType t = fmap isJust $ runMaybeT $ do
   guardM $ lift $ resolvesToRecord hd
 
 autoRecordModuleSynonym :: Access -> C.Name -> C.Expr -> ScopeM (Maybe A.Declaration)
-autoRecordModuleSynonym = autoRecordModuleSynonym' Apply TopOpenModule
+autoRecordModuleSynonym = autoRecordModuleSynonym' Apply TopOpenModule WarnNoSynonym
 
 -- | Variant of 'autoRecordModuleSynonym' for @let@-bound module
 --   synonyms (e.g. for typed lambda binders).
 autoRecordLetSynonym :: C.Name -> C.Expr -> ScopeM (Maybe A.LetBinding)
-autoRecordLetSynonym = autoRecordModuleSynonym' LetApply LetOpenModule privateAccessInserted
+autoRecordLetSynonym = autoRecordModuleSynonym' LetApply LetOpenModule WarnNoSynonym privateAccessInserted
+
+-- | Quiet variants for synonyms that are re-generated from a
+--   declaration whose canonical occurrence already warns (e.g. the
+--   data/record signature), to avoid duplicate warnings.
+autoRecordModuleSynonymQuiet :: Access -> C.Name -> C.Expr -> ScopeM (Maybe A.Declaration)
+autoRecordModuleSynonymQuiet = autoRecordModuleSynonym' Apply TopOpenModule QuietNoSynonym
+
+autoRecordLetSynonymQuiet :: C.Name -> C.Expr -> ScopeM (Maybe A.LetBinding)
+autoRecordLetSynonymQuiet = autoRecordModuleSynonym' LetApply LetOpenModule QuietNoSynonym privateAccessInserted
+
+-- | Whether a failure to generate a plausibly expected module synonym
+--   should be reported to the user.
+data WarnNoSynonym = WarnNoSynonym | QuietNoSynonym
+  deriving Eq
+
+-- | Guard for record /field/ module synonyms: the generated module
+--   application uses the field (projection or constructor-type
+--   variable) in a relevant, non-erased position, so for irrelevant
+--   or erased fields it would not type-check.  Run the generator only
+--   for usable fields; otherwise warn (if a synonym was plausibly
+--   expected) and generate nothing.
+autoRecordFieldSynonym
+  :: WarnNoSynonym -> ArgInfo -> C.Name -> C.Expr
+  -> ScopeM (Maybe a) -> ScopeM (Maybe a)
+autoRecordFieldSynonym warn ai x t generate
+  | isRelevant ai, not (hasQuantity0 ai) = generate
+  | otherwise = do
+      when (warn == WarnNoSynonym) $
+        whenM (optAutoRecordModules <$> pragmaOptions) $
+          whenM (recordHeadedType t) $
+            setCurrentRange x $ warning $ NoRecordModuleSynonym $ P.fsep $
+              P.pwords "No module synonym was generated for" ++ [P.pretty x <> ","] ++
+              P.pwords "because the field is irrelevant or erased"
+      return Nothing
 
 autoRecordModuleSynonym'
   :: (ToConcrete a, Pretty (ConOfAbs a))
   => (ModuleInfo -> Erased -> ModuleName -> A.ModuleApplication
       -> ScopeCopyInfo -> A.ImportDirective -> a)
   -> OpenKind
+  -> WarnNoSynonym
   -> Access -> C.Name -> C.Expr -> ScopeM (Maybe a)
-autoRecordModuleSynonym' apply kind p x t = runMaybeT $ do
+autoRecordModuleSynonym' apply kind warn p x t = runMaybeT $ do
   guardM $ lift $ optAutoRecordModules <$> pragmaOptions
   let (dom, target) = peelDomains t
   (hd, _ps) <- targetParts target
@@ -2900,9 +3007,10 @@ autoRecordModuleSynonym' apply kind p x t = runMaybeT $ do
   -- From here on the user plausibly expects a module synonym, so we
   -- warn instead of failing silently when we cannot generate one.
   let bail reason = do
-        lift $ setCurrentRange x $ warning $ NoRecordModuleSynonym $ P.fsep $
-          P.pwords "No module synonym was generated for" ++ [P.pretty x <> ","] ++
-          P.pwords "because" ++ P.pwords reason
+        when (warn == WarnNoSynonym) $
+          lift $ setCurrentRange x $ warning $ NoRecordModuleSynonym $ P.fsep $
+            P.pwords "No module synonym was generated for" ++ [P.pretty x <> ","] ++
+            P.pwords "because" ++ P.pwords reason
         mzero
   -- A wildcard cannot be qualified, so nothing is lost: stay silent.
   when (isNoName x) mzero
@@ -3130,13 +3238,33 @@ instance ToAbstract GenTel where
   toAbstract (GenTel tel) =
     uncurry A.GeneralizeTel <$> collectAndBindGeneralizables (catMaybes <$> toAbstract tel)
 
+-- | Variant of 'GenTel' for data and record signature telescopes
+--   (--auto-record-modules): a record-headed binder additionally gets
+--   a let-bound module synonym, in scope for the rest of the telescope
+--   and the target type.
+newtype GenTelSyn = GenTelSyn C.Telescope
+
+instance ToAbstract GenTelSyn where
+  type AbsOfCon GenTelSyn = A.GeneralizeTelescope
+  toAbstract (GenTelSyn tel) =
+    uncurry A.GeneralizeTel <$> collectAndBindGeneralizables (telToAbstractWithSynonyms tel)
+
+-- | Scope check a telescope, inserting a let-bound record module
+--   synonym after each record-headed binder (--auto-record-modules).
+telToAbstractWithSynonyms :: C.Telescope -> ScopeM [A.TypedBinding]
+telToAbstractWithSynonyms tel = fmap concat $ forM tel \ tb -> do
+  mtb  <- toAbstract tb
+  syns <- forMaybeM (telParamsWithTypes [tb]) \ (n, ty) ->
+    fmap (A.TLet (getRange n) . singleton) <$> autoRecordLetSynonym n ty
+  return $ maybeToList mtb ++ syns
+
 instance ToAbstract GenTelAndType where
   type AbsOfCon GenTelAndType = (A.GeneralizeTelescope, A.Expr)
 
   toAbstract (GenTelAndType tel t) = do
     (binds, (tel, t)) <- collectAndBindGeneralizables $
-                          (,) <$> toAbstract tel <*> toAbstract t
-    return (A.GeneralizeTel binds (catMaybes tel), t)
+                          (,) <$> telToAbstractWithSynonyms tel <*> toAbstract t
+    return (A.GeneralizeTel binds tel, t)
 
 -- ** Record directives
 ------------------------------------------------------------------------
@@ -3204,7 +3332,7 @@ lookupModuleInCurrentModule x =
 -- ** Helper functions for constructor declarations
 ------------------------------------------------------------------------
 
-data DataConstrDecl = DataConstrDecl A.ModuleName IsAbstract Access C.NiceDeclaration
+data DataConstrDecl = DataConstrDecl A.ModuleName IsAbstract Access [(C.Name, C.Expr)] C.NiceDeclaration
 
 -- | Bind a @data@ constructor.
 bindConstructorName ::
@@ -3273,13 +3401,24 @@ bindUnquoteConstructorName m p c = do
 instance ToAbstract DataConstrDecl where
   type AbsOfCon DataConstrDecl = A.Declaration
 
-  toAbstract (DataConstrDecl m a p d) = traceCall (ScopeCheckDeclaration d) do
+  toAbstract (DataConstrDecl m a p synParams d) = traceCall (ScopeCheckDeclaration d) do
     case d of
       C.Axiom r p1 a1 i ai x t -> do
         -- unless (p1 == p) __IMPOSSIBLE__  -- This invariant is currently violated by test/Succeed/Issue282.agda
         unless (a1 == a) __IMPOSSIBLE__
         ai <- checkConstructorArgInfo ai
-        t' <- toAbstractCtx TopCtx t
+        -- Let-bound module synonyms for the data parameters of record
+        -- type (--auto-record-modules), in scope in the constructor
+        -- type.  Scoped per constructor via 'localScope': each
+        -- constructor type gets its own copies of the synonym modules.
+        -- Quiet: the data signature already warned about parameters we
+        -- do not understand.
+        t' <- localScope do
+          syns <- forMaybeM synParams \ (n, ty) -> autoRecordLetSynonymQuiet n ty
+          t'   <- toAbstractCtx TopCtx t
+          return $ case syns of
+            []     -> t'
+            l : ls -> A.Let (ExprRange (getRange t)) (l :| ls) t'
         -- The abstract name is the qualified one
         -- Bind it twice, once unqualified and once qualified
         f <- getConcreteFixity x
@@ -3696,9 +3835,10 @@ whereToAbstract1 r e whname anns whds inner = do
   am  <- toAbstract (NewModuleName m)
   (scope, d) <- scopeCheckModule r e (C.QName m) am [] $ do
     -- Auto record module synonyms for the clause's type-ascribed
-    -- pattern variables (--auto-record-modules).
+    -- pattern variables (--auto-record-modules).  Private, so that
+    -- they do not leak from named (public) where modules.
     syns <- catMaybes <$> forM anns
-      (\ (x, ty) -> autoRecordModuleSynonym PublicAccess x ty)
+      (\ (x, ty) -> autoRecordModuleSynonym privateAccessInserted x ty)
     ds <- scopeCheckDeclarations whds
     return $ syns ++ ds
   setScope scope

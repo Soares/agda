@@ -194,3 +194,93 @@ useUsingWhere X x using (A : Magma) ← X = twice
 -- telescope and the codomain (used heavily in dependent signatures).
 piSyn : ∀ (A : Magma) {q : A.Carrier} → A.Carrier → A.Carrier
 piSyn (A : Magma) x = x A.∘ x
+
+-- Record parameters of record type get a synonym inside the record
+-- module: in field types, in the constructor type, and in non-field
+-- definitions (found dogfooding in WildBracket's Cat.agda).
+record MagmaHom (A B : Magma) : Set where
+  field
+    map  : A.Carrier → B.Carrier
+    resp : A.Carrier → B.Carrier
+
+  mapTwice : A.Carrier → B.Carrier
+  mapTwice a = map (a A.∘ a) B.∘ resp a
+
+idHom : (A : Magma) → MagmaHom A A
+idHom (A : Magma) = record { map = λ a → a ; resp = λ a → a A.∘ a }
+
+-- The synonym also works when the record definition is separate from
+-- its signature, including renamed parameters and omitted hidden ones.
+record SepHom {A : Magma} (B : Magma) : Set
+record SepHom Y where
+  field sep : Y.Carrier
+
+-- Hidden parameters mentioned in the definition align as well.
+record SepHom2 {A : Magma} (B : Magma) : Set
+record SepHom2 {X} Y where
+  field sep2 : X.Carrier → Y.Carrier
+
+-- Record-typed fields get a module synonym after the field: in later
+-- field types, in non-field definitions in the record body, and
+-- (public, like the field) from outside the record module.
+record TwoMagmas : Set₁ where
+  field
+    first  : Magma
+    second : Magma
+    embed  : first.Carrier → second.Carrier
+
+  back : first.Carrier → second.Carrier
+  back x = embed (x first.∘ x)
+
+mkTwo : TwoMagmas
+mkTwo = record { first = M ; second = M ; embed = λ x → x }
+
+useFieldSyn :
+  (T : TwoMagmas) → TwoMagmas.first.Carrier T → TwoMagmas.second.Carrier T
+useFieldSyn T = TwoMagmas.back T
+
+-- Opening the record module applied to a value also brings the field
+-- synonyms into scope.
+module UseTwo (T : TwoMagmas) where
+  open TwoMagmas T
+  go : first.Carrier → second.Carrier
+  go x = embed (x first.∘ x)
+
+-- A field whose type mentions an earlier field through its synonym
+-- (found dogfooding in WildBracket's Spec.agda).
+record SpecLike : Set₁ where
+  field
+    Mg  : Magma
+    pt  : Pointed Mg.Carrier
+    out : Mg.Carrier
+
+  shifted : Mg.Carrier
+  shifted = pt.point Mg.∘ out
+
+mkSpecLike : SpecLike
+mkSpecLike = record { Mg = M ; pt = Q ; out = 3 }
+
+specOut : (S : SpecLike) → SpecLike.Mg.Carrier S
+specOut = SpecLike.shifted
+
+-- An irrelevant (or erased) field cannot be used in the generated
+-- module application, so no synonym is generated; see the .warn file.
+record IrrField : Set₁ where
+  field
+    .irrM : Magma
+
+-- Data parameters of record type get a synonym: in the rest of the
+-- data telescope and target type, and in the constructor types (found
+-- dogfooding in WildBracket's Chain.agda).
+data Walk (A : Magma) (a : A.Carrier) : Set where
+  stop : Walk A a
+  step : A.Carrier → Walk A a → Walk A a
+
+walkTwo : (A : Magma) (a : A.Carrier) → Walk A a
+walkTwo (A : Magma) a = step (a A.∘ a) stop
+
+-- The synonym is in scope in the indices and works with a separate
+-- signature and renamed parameters.
+data SepWalk (A : Magma) : A.Carrier → Set
+data SepWalk B where
+  sep : (b : B.Carrier) → SepWalk B b

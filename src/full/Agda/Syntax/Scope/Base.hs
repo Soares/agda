@@ -128,8 +128,23 @@ data ScopeInfo = ScopeInfo
       , _scopePolarities    :: C.Polarities  -- ^ Maps concrete names C.Name to polarities
       , _scopeRecords       :: Map A.QName (A.QName, Maybe Induction)
         -- ^ Maps the name of a record to the name of its (co)constructor.
+      , _scopeSigParams     :: SigParamsMap
+        -- ^ Maps the name of a record to the concrete parameters of its
+        --   signature, so that the record definition can recover the
+        --   parameter types.
+        --   Only populated under @--auto-record-modules@.
       }
   deriving (Show, Generic)
+
+-- | Concrete parameters of record signatures, stored so that record
+--   definitions can recover their parameter types
+--   (@--auto-record-modules@).  The 'Show' instance is a stub, since
+--   concrete expressions have none.
+newtype SigParamsMap = SigParamsMap { theSigParamsMap :: Map A.QName C.Parameters }
+  deriving Generic
+
+instance Show SigParamsMap where
+  show _ = "SigParamsMap"
 
 -- | For the sake of highlighting, the '_scopeInverseName' map also stores
 --   the 'KindOfName' of an @A.QName@.
@@ -148,7 +163,7 @@ type NameMap   = HashMap NameId      NameMapEntry
 type ModuleMap = HashMap A.ModuleName [C.QName]
 
 instance Eq ScopeInfo where
-  ScopeInfo c1 m1 v1 l1 p1 _ _ _ _ _ _ == ScopeInfo c2 m2 v2 l2 p2 _ _ _ _ _ _ =
+  ScopeInfo c1 m1 v1 l1 p1 _ _ _ _ _ _ _ == ScopeInfo c2 m2 v2 l2 p2 _ _ _ _ _ _ _ =
     c1 == c2 && m1 == m2 && v1 == v2 && l1 == l2 && p1 == p2
 
 -- | Local variables.
@@ -279,6 +294,11 @@ scopeRecords :: Lens' ScopeInfo (Map A.QName (A.QName, Maybe Induction))
 scopeRecords f s =
   f (_scopeRecords s) <&>
   \x -> s { _scopeRecords = x }
+
+scopeSigParams :: Lens' ScopeInfo (Map A.QName C.Parameters)
+scopeSigParams f s =
+  f (theSigParamsMap $ _scopeSigParams s) <&>
+  \x -> s { _scopeSigParams = SigParamsMap x }
 
 scopeFixitiesAndPolarities :: Lens' ScopeInfo (C.Fixities, C.Polarities)
 scopeFixitiesAndPolarities f s =
@@ -779,6 +799,7 @@ emptyScopeInfo = ScopeInfo
   , _scopeFixities      = Map.empty
   , _scopePolarities    = Map.empty
   , _scopeRecords       = Map.empty
+  , _scopeSigParams     = SigParamsMap Map.empty
   }
 
 -- | Map functions over the names and modules in a scope.
@@ -1670,7 +1691,7 @@ blockOfLines _  [] = []
 blockOfLines hd ss = hd : map (nest 2) ss
 
 instance Pretty ScopeInfo where
-  pretty (ScopeInfo this mods toBind locals ctx _ _ _ fixs _ _) = vcat $ concat
+  pretty (ScopeInfo this mods toBind locals ctx _ _ _ fixs _ _ _) = vcat $ concat
     [ [ "ScopeInfo"
       , nest 2 $ "current =" <+> pretty this
       ]
@@ -1701,3 +1722,4 @@ instance NFData NameSpaceId
 instance NFData ResolvedName
 instance NFData Scope
 instance NFData ScopeInfo
+instance NFData SigParamsMap

@@ -1224,7 +1224,10 @@ instance (ToConcrete p, ToConcrete a) => ToConcrete (RewriteEqn' qn A.BindName p
 instance ToConcrete (Constr A.Constructor) where
   type ConOfAbs (Constr A.Constructor) = C.Declaration
 
-  toConcrete (Constr (A.ScopedDecl scope (d :| []))) =
+  -- A 'ScopedDecl' can group a constructor or field with a generated
+  -- module synonym (--auto-record-modules); the interesting
+  -- declaration comes first.
+  toConcrete (Constr (A.ScopedDecl scope (d :| _))) =
     withScope scope $ toConcrete (Constr d)
   toConcrete (Constr (A.Axiom _ i info Nothing x t)) = do
     x' <- unsafeQNameToName <$> toConcrete x

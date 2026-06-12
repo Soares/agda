@@ -1,0 +1,6 @@
+AutoRecordModulesPrivateWhere.agda:20.12-25: error: [NotInScope]
+Not in scope:
+  f.W.A.Carrier
+  at AutoRecordModulesPrivateWhere.agda:20.12-25
+    (did you mean 'Magma.Carrier'?)
+when scope checking f.W.A.Carrier
