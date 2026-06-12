@@ -48,3 +48,7 @@ constrMatch ((zero)  : Nat) = zero
 asMatch : Nat → Nat
 asMatch (m@(suc n) : Nat) = m + n
 asMatch (z@zero    : Nat) = z
+
+-- Ascribed binders in using statements.
+viaUsing : Nat → Nat
+viaUsing k using (n : Nat) ← suc k = n + n

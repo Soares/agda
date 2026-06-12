@@ -460,7 +460,17 @@ buildUsingStmt es = do
   mpatexprs <- mapM exprToAssignment es
   case mapM (fmap $ \(pat, _, expr) -> (pat, expr)) mpatexprs of
     Nothing -> parseError' (rStart' $ getRange es) "Expected assignments"
-    Just assignments -> pure $ LeftLet assignments
+    Just assignments -> do
+      mapM_ (rejectAnn . snd) assignments
+      pure $ LeftLet assignments
+  where
+    -- Type ascriptions parse as atoms anywhere in a using statement,
+    -- but only make sense as binders, i.e. left of the arrow.
+    rejectAnn = \case
+      RawApp _ es  -> mapM_ rejectAnn es
+      e@Ann{}      -> parseErrorRange e
+        "Type-ascribed binders are only allowed left of the arrow"
+      _            -> pure ()
 
 buildSingleWithStmt ::
   Named Name Expr ->

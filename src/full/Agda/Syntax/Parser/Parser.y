@@ -1260,6 +1260,25 @@ LHSAtom_P(recordUpdate)
     : Expr3_P(recordUpdate)   { singleton $1 }
     | '(' TBindWithHiding ')' {% mkAscriptions (getRange ($1,$2,$3)) $2 }
 
+-- The expressions of a @using@ statement: like 'UnnamedWithExprs', but
+-- allowing type-ascribed binders @(x : T)@ left of the arrow (they are
+-- rejected on the right-hand side of the arrow by 'buildUsingStmt').
+UsingExprs :: { List1 Expr }
+UsingExprs
+  : UsingApplication3 '|' UsingExprs { rawApp $1 <| $3 }
+  | UsingApplication                 { singleton (rawApp $1) }
+
+UsingApplication :: { List1 Expr }
+UsingApplication
+    : Expr2_P(RecordUpdate)                    { singleton $1 }
+    | '(' TBindWithHiding ')'                  {% mkAscriptions (getRange ($1,$2,$3)) $2 }
+    | LHSAtom_P(RecordUpdate) UsingApplication { $1 <> $2 }
+
+UsingApplication3 :: { List1 Expr }
+UsingApplication3
+    : LHSAtom_P(RecordUpdate)                    { $1 }
+    | LHSAtom_P(RecordUpdate) UsingApplication3  { $1 <> $2 }
+
 -- Parsing either an expression @e@ or a @(rewrite | with p <-) e1 | ... | en@.
 HoleContent :: { HoleContent }
 HoleContent
@@ -1367,7 +1386,7 @@ WHS
   : {- empty -}                           { [] }
   | 'with'    WithExprs        WHS {% fmap (++ $3) (buildWithStmt $2) }
   | 'rewrite' UnnamedWithExprs WHS { Left (Rewrite $ fmap ((),) $2) : $3 }
-  | 'using'   UnnamedWithExprs WHS {% do
+  | 'using'   UsingExprs WHS {% do
       eqn <- buildUsingStmt $2
       pure $ Left eqn : $3 }
 
