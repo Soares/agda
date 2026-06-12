@@ -114,3 +114,42 @@ letTest =
   let L : Magma
       L = M
   in 3 L.∘ 4
+
+-- Type-ascribed pattern variables.  A plain checked ascription:
+ann1 : Nat → Nat
+ann1 (n : Nat) = suc n
+
+-- The ascription fills in a hole in the signature by unification.
+ann2 : _ → Bool
+ann2 (n : Nat) = true
+
+-- Record-headed ascriptions give clause-scoped module synonyms.
+annSyn : (X : Magma) → Magma.Carrier X → Magma.Carrier X
+annSyn (A : Magma) x = x A.∘ x
+
+-- Multiple variables in one ascription atom.
+annTwo : Magma → Magma → Nat
+annTwo (A B : Magma) = 0
+
+-- The synonym is in scope in with-expressions
+-- (via the implicit where module).
+annWith : (X : Magma) → Magma.Carrier X → Nat
+annWith (A : Magma) x with x A.∘ x
+... | _ = 2
+
+-- ... and in where blocks.
+annWhere : (X : Magma) → Magma.Carrier X → Magma.Carrier X
+annWhere (A : Magma) x = twice
+  where
+    twice : Magma.Carrier A
+    twice = x A.∘ x
+
+-- Postfix copattern clauses with ascriptions.
+record Pair : Set₁ where
+  field
+    fst snd : Magma
+
+mkPair : Magma → Pair
+mkPair (A : Magma) .Pair.fst = A
+mkPair (A : Magma) .Pair.snd = record
+  { Carrier = A.Carrier ; _∘_ = A._∘_ }

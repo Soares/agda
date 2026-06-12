@@ -2760,6 +2760,64 @@ telParamsWithTypes tel =
   , not $ isNoName $ C.boundName $ C.binderName b
   ]
 
+-- | Split a concrete type into its domains and target.
+--   The niceifier wraps signature types in 'C.Generalized'; if any
+--   generalizable variables actually occur in the type, the
+--   generated module application will not see the inserted binders
+--   and will likely fail to check, but for the common case of no
+--   generalization the wrapper is just noise.
+peelDomains :: C.Expr -> ([Either (Arg C.Expr) C.TypedBinding], C.Expr)
+peelDomains = \case
+  C.Generalized e -> peelDomains e
+  C.Pi tel b      -> first (map Right (List1.toList tel) ++) $ peelDomains b
+  C.Fun _ a b     -> first (Left a :) $ peelDomains b
+  e               -> ([], e)
+
+plainTBind :: C.TypedBinding -> Bool
+plainTBind = \case
+  C.TBind _ xs _ -> all (isNothing . C.binderPattern . namedArg) xs
+  C.TLet{}       -> False
+
+tbindNames :: C.TypedBinding -> [C.Name]
+tbindNames = \case
+  C.TBind _ xs _ -> map (C.boundName . C.binderName . namedArg) $ List1.toList xs
+  C.TLet{}       -> []
+
+-- | Decompose a type's target into its head and the (raw) arguments.
+--   Re-parsing the raw application tells us whether the head is
+--   captured by an infix operator (in which case we give up).
+targetParts :: C.Expr -> MaybeT ScopeM (C.QName, [C.Expr])
+targetParts = \case
+  C.Ident q   -> pure (q, [])
+  C.Paren _ e -> targetParts e
+  C.RawApp _ es@(List2 e1 e2 rest)
+    | C.Ident q <- e1 -> do
+        parsed <- MaybeT $ (Just <$> parseApplication es)
+                    `catchError` \ _ -> pure Nothing
+        case appHead parsed of
+          Just q' | q' == q -> pure (q, e2 : rest)
+          _                 -> mzero
+  _ -> mzero
+  where
+    appHead :: C.Expr -> Maybe C.QName
+    appHead = \case
+      C.App _ f _ -> appHead f
+      C.Paren _ e -> appHead e
+      C.Ident q   -> Just q
+      _           -> Nothing
+
+resolvesToRecord :: C.QName -> ScopeM Bool
+resolvesToRecord hd = resolveName hd <&> \case
+  DefinedName _ d _ -> anameKind d == RecName
+  _ -> False
+
+-- | Does the type have a syntactically record-headed target (the
+--   condition under which a module synonym is generated)?
+recordHeadedType :: C.Expr -> ScopeM Bool
+recordHeadedType t = fmap isJust $ runMaybeT $ do
+  (hd, _) <- targetParts $ snd $ peelDomains t
+  guardM $ lift $ resolvesToRecord hd
+
 autoRecordModuleSynonym :: Access -> C.Name -> C.Expr -> ScopeM (Maybe A.Declaration)
 autoRecordModuleSynonym = autoRecordModuleSynonym' Apply TopOpenModule
 
@@ -2788,9 +2846,7 @@ autoRecordModuleSynonym' apply kind p x t = runMaybeT $ do
     C.QName h -> guard $ h `notElem` userNames
     C.Qual{}  -> pure ()
   -- The head must resolve to a record type.
-  lift (resolveName hd) >>= \case
-    DefinedName _ d _ | anameKind d == RecName -> pure ()
-    _ -> mzero
+  guardM $ lift $ resolvesToRecord hd
   -- Invent names for anonymous domains.
   (tel, vars) <- lift $ nameDomains userNames dom
   -- The module application @R (x Δ)@.  The record parameters are all
@@ -2800,52 +2856,6 @@ autoRecordModuleSynonym' apply kind p x t = runMaybeT $ do
   lift $ checkModuleMacro apply kind (getRange x) p defaultErased x
            modapp DontOpen defaultImportDir
   where
-    -- Split a concrete type into its domains and target.
-    -- The niceifier wraps signature types in 'C.Generalized'; if any
-    -- generalizable variables actually occur in the type, the
-    -- generated module application will not see the inserted binders
-    -- and will likely fail to check, but for the common case of no
-    -- generalization the wrapper is just noise.
-    peelDomains :: C.Expr -> ([Either (Arg C.Expr) C.TypedBinding], C.Expr)
-    peelDomains = \case
-      C.Generalized e -> peelDomains e
-      C.Pi tel b      -> first (map Right (List1.toList tel) ++) $ peelDomains b
-      C.Fun _ a b     -> first (Left a :) $ peelDomains b
-      e               -> ([], e)
-
-    plainTBind :: C.TypedBinding -> Bool
-    plainTBind = \case
-      C.TBind _ xs _ -> all (isNothing . C.binderPattern . namedArg) xs
-      C.TLet{}       -> False
-
-    tbindNames :: C.TypedBinding -> [C.Name]
-    tbindNames = \case
-      C.TBind _ xs _ -> map (C.boundName . C.binderName . namedArg) $ List1.toList xs
-      C.TLet{}       -> []
-
-    -- Decompose the target into its head and the (raw) arguments.
-    -- Re-parsing the raw application tells us whether the head is
-    -- captured by an infix operator (in which case we give up).
-    targetParts :: C.Expr -> MaybeT ScopeM (C.QName, [C.Expr])
-    targetParts = \case
-      C.Ident q   -> pure (q, [])
-      C.Paren _ e -> targetParts e
-      C.RawApp _ es@(List2 e1 e2 rest)
-        | C.Ident q <- e1 -> do
-            parsed <- MaybeT $ (Just <$> parseApplication es)
-                        `catchError` \ _ -> pure Nothing
-            case appHead parsed of
-              Just q' | q' == q -> pure (q, e2 : rest)
-              _                 -> mzero
-      _ -> mzero
-
-    appHead :: C.Expr -> Maybe C.QName
-    appHead = \case
-      C.App _ f _ -> appHead f
-      C.Paren _ e -> appHead e
-      C.Ident q   -> Just q
-      _           -> Nothing
-
     -- Turn the domains into a module telescope, naming anonymous ones,
     -- and return the variables to apply @x@ to.
     nameDomains
@@ -3528,6 +3538,13 @@ instance ToAbstract C.Clause where
     vars0 <- getLocalVars
     lhs' <- toAbstract $ LeftHandSide (C.QName top) p NoDisplayLHS
     printLocals 30 "after lhs:"
+    -- Type-ascribed pattern variables @(x : T)@ with a record-headed @T@
+    -- give rise to module synonyms (--auto-record-modules), routed
+    -- through the (possibly implicit) where module so that they are in
+    -- scope in the right hand side and in with/rewrite expressions.
+    anns <- ifM (optAutoRecordModules <$> pragmaOptions)
+      (filterM (recordHeadedType . snd) $ patternAscriptions p)
+      (return [])
     vars1 <- getLocalVars
     eqs <- mapM (toAbstractCtx TopCtx) eqs
     vars2 <- getLocalVars
@@ -3537,26 +3554,36 @@ instance ToAbstract C.Clause where
     -- Handle rewrite equations first.
     if not (null eqs)
       then do
-        rhs <- toAbstractCtx TopCtx $ RightHandSide eqs with wcs' rhs wh
+        rhs <- toAbstractCtx TopCtx $ RightHandSide anns eqs with wcs' rhs wh
         rhs <- toAbstract rhs
         return $ A.Clause lhs' [] rhs A.noWhereDecls catchall
       else do
         -- the right hand side is checked with the module of the local definitions opened
-        (rhs, ds) <- whereToAbstract (getRange wh) wh $
-                       toAbstractCtx TopCtx $ RightHandSide [] with wcs' rhs NoWhere
+        (rhs, ds) <- whereToAbstract (getRange wh) anns wh $
+                       toAbstractCtx TopCtx $ RightHandSide [] [] with wcs' rhs NoWhere
         rhs <- toAbstract rhs
         return $ A.Clause lhs' [] rhs ds catchall
 
 
+-- | All named type-ascribed pattern variables @(x : T)@ in a pattern.
+patternAscriptions :: C.Pattern -> [(C.Name, C.Expr)]
+patternAscriptions = foldrCPattern step
+  where
+    step (C.AnnP _ x ty) acc | not (isNoName x) = (x, ty) : acc
+    step _ acc = acc
+
 whereToAbstract
   :: Range                            -- ^ The range of the @where@ block.
+  -> [(C.Name, C.Expr)]               -- ^ Type-ascribed pattern variables of the clause.
   -> C.WhereClause                    -- ^ The @where@ block.
   -> ScopeM a                         -- ^ The scope-checking task to be run in the context of the @where@ module.
   -> ScopeM (a, A.WhereDeclarations)  -- ^ Additionally return the scope-checked contents of the @where@ module.
-whereToAbstract r wh inner = do
+whereToAbstract r anns wh inner = do
   case wh of
-    NoWhere       -> ret
-    AnyWhere _ [] -> warnEmptyWhere
+    NoWhere
+      | null anns -> ret
+      | otherwise -> enter $ whereToAbstract1 r defaultErased Nothing anns [] inner
+    AnyWhere _ [] | null anns -> warnEmptyWhere
     AnyWhere _ ds -> enter do
       -- Andreas, 2016-07-17 issues #2081 and #2101
       -- where-declarations are automatically private.
@@ -3565,12 +3592,13 @@ whereToAbstract r wh inner = do
       -- that we check their type signatures in abstract mode,
       -- we still need to mark the declaration as private
       -- e.g. to avoid spurious UnknownFixityInMixfixDecl warnings (issue #2889).
-      whereToAbstract1 r defaultErased Nothing
-        (singleton $ C.Private empty Inserted ds) inner
-    SomeWhere _ e m a ds0 -> enter $
-      List1.ifNull ds0 warnEmptyWhere {-else-} \ ds ->
-      -- Named where-modules do not default to private.
-      whereToAbstract1 r e (Just (m, a)) ds inner
+      whereToAbstract1 r defaultErased Nothing anns
+        (if null ds then [] else [C.Private empty Inserted ds]) inner
+    SomeWhere _ e m a ds0
+      | null ds0, null anns -> warnEmptyWhere
+      | otherwise -> enter $
+          -- Named where-modules do not default to private.
+          whereToAbstract1 r e (Just (m, a)) anns ds0 inner
   where
   enter = localTC (set eCheckingWhere (C.whereClause_ wh))
   ret = (,A.noWhereDecls) <$> inner
@@ -3582,10 +3610,11 @@ whereToAbstract1
   :: Range                            -- ^ The range of the @where@-block.
   -> Erased                           -- ^ Is the where module erased?
   -> Maybe (C.Name, Access)           -- ^ The name of the @where@ module (if any).
-  -> List1 C.Declaration              -- ^ The contents of the @where@ module.
+  -> [(C.Name, C.Expr)]               -- ^ Type-ascribed pattern variables of the clause.
+  -> [C.Declaration]                  -- ^ The contents of the @where@ module.
   -> ScopeM a                         -- ^ The scope-checking task to be run in the context of the @where@ module.
   -> ScopeM (a, A.WhereDeclarations)  -- ^ Additionally return the scope-checked contents of the @where@ module.
-whereToAbstract1 r e whname whds inner = do
+whereToAbstract1 r e whname anns whds inner = do
   -- ASR (16 November 2015) Issue 1137: We ban termination
   -- pragmas inside `where` clause.
   checkNoTerminationPragma InWhereBlock whds
@@ -3598,8 +3627,13 @@ whereToAbstract1 r e whname whds inner = do
            -- unnamed where's are private
   old <- getCurrentModule
   am  <- toAbstract (NewModuleName m)
-  (scope, d) <- scopeCheckModule r e (C.QName m) am [] $
-                scopeCheckDeclarations $ List1.toList whds
+  (scope, d) <- scopeCheckModule r e (C.QName m) am [] $ do
+    -- Auto record module synonyms for the clause's type-ascribed
+    -- pattern variables (--auto-record-modules).
+    syns <- catMaybes <$> forM anns
+      (\ (x, ty) -> autoRecordModuleSynonym PublicAccess x ty)
+    ds <- scopeCheckDeclarations whds
+    return $ syns ++ ds
   setScope scope
   x <- inner
   setCurrentModule old
@@ -3655,7 +3689,10 @@ checkNoTerminationPragma b ds =
       C.OverlapPragma _ _ _         -> []
 
 data RightHandSide = RightHandSide
-  { _rhsRewriteEqn :: [RewriteEqn' () A.BindName A.Pattern A.Expr]
+  { _rhsAnns       :: [(C.Name, C.Expr)]
+    -- ^ Type-ascribed pattern variables of the clause (for
+    --   --auto-record-modules synonyms in the where module).
+  , _rhsRewriteEqn :: [RewriteEqn' () A.BindName A.Pattern A.Expr]
     -- ^ @rewrite e | with p <- e in eq@ (many)
   , _rhsWithExpr   :: [C.WithExpr]
     -- ^ @with e@ (many)
@@ -3746,14 +3783,14 @@ instance ToAbstract AbstractRHS where
 
 instance ToAbstract RightHandSide where
   type AbsOfCon RightHandSide = AbstractRHS
-  toAbstract (RightHandSide eqs@(_:_) es cs rhs wh)               = do
-    (rhs, ds) <- whereToAbstract (getRange wh) wh $
-                   toAbstract (RightHandSide [] es cs rhs NoWhere)
+  toAbstract (RightHandSide anns eqs@(_:_) es cs rhs wh)               = do
+    (rhs, ds) <- whereToAbstract (getRange wh) anns wh $
+                   toAbstract (RightHandSide [] [] es cs rhs NoWhere)
     return $ RewriteRHS' eqs rhs ds
-  toAbstract (RightHandSide [] []    (_  , _:_) _          _)  = __IMPOSSIBLE__
-  toAbstract (RightHandSide [] (_:_) _         (C.RHS _)   _)  = typeError BothWithAndRHS -- issue #7760
-  toAbstract (RightHandSide [] []    (_  , []) rhs         NoWhere) = toAbstract rhs
-  toAbstract (RightHandSide [] (z:zs)(lv , c:cs) C.AbsurdRHS NoWhere) = do
+  toAbstract (RightHandSide _ [] []    (_  , _:_) _          _)  = __IMPOSSIBLE__
+  toAbstract (RightHandSide _ [] (_:_) _         (C.RHS _)   _)  = typeError BothWithAndRHS -- issue #7760
+  toAbstract (RightHandSide _ [] []    (_  , []) rhs         NoWhere) = toAbstract rhs
+  toAbstract (RightHandSide _ [] (z:zs)(lv , c:cs) C.AbsurdRHS NoWhere) = do
     let (ns, es) = List1.unzipWith (\ (Named nm e) -> (NewName WithBound . C.mkBoundName_ <$> nm, e)) $ z :| zs
     es <- toAbstractCtx TopCtx es
     lvars0 <- getLocalVars
@@ -3764,13 +3801,13 @@ instance ToAbstract RightHandSide where
     let nes = List1.zipWith Named ns es
     return $ WithRHS' nes cs'
   -- TODO: some of these might be possible
-  toAbstract (RightHandSide [] (_ : _) _ C.AbsurdRHS  AnyWhere{}) = __IMPOSSIBLE__
-  toAbstract (RightHandSide [] (_ : _) _ C.AbsurdRHS SomeWhere{}) = __IMPOSSIBLE__
-  toAbstract (RightHandSide [] (_ : _) _ C.AbsurdRHS   NoWhere{}) = __IMPOSSIBLE__
-  toAbstract (RightHandSide [] []     (_, []) C.AbsurdRHS  AnyWhere{}) = __IMPOSSIBLE__
-  toAbstract (RightHandSide [] []     (_, []) C.AbsurdRHS SomeWhere{}) = __IMPOSSIBLE__
-  toAbstract (RightHandSide [] []     (_, []) C.RHS{}      AnyWhere{}) = __IMPOSSIBLE__
-  toAbstract (RightHandSide [] []     (_, []) C.RHS{}     SomeWhere{}) = __IMPOSSIBLE__
+  toAbstract (RightHandSide _ [] (_ : _) _ C.AbsurdRHS  AnyWhere{}) = __IMPOSSIBLE__
+  toAbstract (RightHandSide _ [] (_ : _) _ C.AbsurdRHS SomeWhere{}) = __IMPOSSIBLE__
+  toAbstract (RightHandSide _ [] (_ : _) _ C.AbsurdRHS   NoWhere{}) = __IMPOSSIBLE__
+  toAbstract (RightHandSide _ [] []     (_, []) C.AbsurdRHS  AnyWhere{}) = __IMPOSSIBLE__
+  toAbstract (RightHandSide _ [] []     (_, []) C.AbsurdRHS SomeWhere{}) = __IMPOSSIBLE__
+  toAbstract (RightHandSide _ [] []     (_, []) C.RHS{}      AnyWhere{}) = __IMPOSSIBLE__
+  toAbstract (RightHandSide _ [] []     (_, []) C.RHS{}     SomeWhere{}) = __IMPOSSIBLE__
 
 instance ToAbstract C.RHS where
     type AbsOfCon C.RHS = AbstractRHS
