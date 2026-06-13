@@ -597,6 +597,20 @@ Copatterns and projections
 
      Opposite of :option:`--postfix-projections`.
 
+.. option:: --postfix-methods
+
+     Generalize postfix projection notation so that ``r .foo`` resolves
+     ``foo`` against the whole record module of ``r``'s type — any definition
+     in the ``record`` block, not only its fields. Resolution is
+     type-directed: ``foo`` is looked up only in that record module (never the
+     surrounding scope), ``r``'s type must be known, and ``r .foo`` is an error
+     if ``foo`` is not a member of it. Off by default. See
+     :ref:`postfix-methods`.
+
+.. option:: --no-postfix-methods
+
+     Opposite of :option:`--postfix-methods` (the default).
+
 Experimental features
 ~~~~~~~~~~~~~~~~~~~~~
 

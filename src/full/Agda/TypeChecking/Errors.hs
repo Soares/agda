@@ -907,6 +907,11 @@ instance PrettyTCM TypeError where
       -- using the warning version to avoid code duplication
       prettyWarning $ NotInScopeW x
 
+    PostfixProjectionNotInRecordModule x r -> fsep $
+      pwords "The postfix projection" ++ ["." <> pretty x] ++
+      pwords "is not valid:" ++ [pretty x] ++ pwords "is not a field or method of the record type" ++
+      [prettyTCM r <> "."]
+
     NoSuchModule x -> do
       -- Andreas, 2025-10-18, issue #8144
       -- In the situation

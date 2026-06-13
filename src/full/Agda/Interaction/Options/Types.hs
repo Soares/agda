@@ -167,6 +167,9 @@ data PragmaOptions = PragmaOptions
   , _optPostfixProjections        :: WithDefault 'True
       -- ^ Should system generated projections 'ProjSystem' be printed
       --   postfix (True) or prefix (False).
+  , _optPostfixMethods            :: WithDefault 'False
+      -- ^ Should postfix projection syntax @x .foo@ also resolve non-field
+      --   members of @x@'s record module (methods), not just fields?
   , _optKeepPatternVariables      :: WithDefault 'True
       -- ^ Should case splitting replace variables with dot patterns
       --   (False) or keep them as variables (True).

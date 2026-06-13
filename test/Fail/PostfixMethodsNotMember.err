@@ -1,0 +1,4 @@
+PostfixMethodsNotMember.agda:21.7-18: error: [PostfixProjectionNotInRecordModule]
+The postfix projection .notThere is not valid: notThere is not a
+field or method of the record type Box.
+when checking that the expression w .notThere has type N

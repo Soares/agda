@@ -864,6 +864,11 @@ instance ToConcrete A.Expr where
     toConcrete (A.Dot i e) =
       C.Dot empty <$> toConcrete e
 
+    -- A 'PostfixMember' only ever occurs inside an 'A.Dot' (which supplies the
+    -- leading dot when printed), so here we emit just the bare name.
+    toConcrete (A.PostfixMember i x) =
+      pure $ C.Ident x
+
     toConcrete e@(A.App i e1 e2) = do
       is <- isBuiltinFun
       -- Special printing of desugared overloaded literals:

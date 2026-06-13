@@ -187,6 +187,7 @@ instance ExprLike Expr where
       QuestionMark{}             -> pure e0
       Underscore{}               -> pure e0
       Dot ei e                   -> Dot ei <$> recurse e
+      PostfixMember{}            -> pure e0
       App ei e arg               -> App ei <$> recurse e <*> recurse arg
       WithApp ei e es            -> WithApp ei <$> recurse e <*> recurse es
       Lam ei b e                 -> Lam ei <$> recurse b <*> recurse e
@@ -223,6 +224,7 @@ instance ExprLike Expr where
       QuestionMark{}           -> m
       Underscore{}             -> m
       Dot _ e                  -> m `mappend` fold e
+      PostfixMember{}          -> m
       App _ e e'               -> m `mappend` fold e `mappend` fold e'
       WithApp _ e es           -> m `mappend` fold e `mappend` fold es
       Lam _ b e                -> m `mappend` fold b `mappend` fold e
@@ -262,6 +264,7 @@ instance ExprLike Expr where
       QuestionMark{}             -> f e
       Underscore{}               -> f e
       Dot ei e                   -> f =<< Dot ei <$> trav e
+      PostfixMember{}            -> f e
       App ei e arg               -> f =<< App ei <$> trav e <*> trav arg
       WithApp ei e es            -> f =<< WithApp ei <$> trav e <*> trav es
       Lam ei b e                 -> f =<< Lam ei <$> trav b <*> trav e

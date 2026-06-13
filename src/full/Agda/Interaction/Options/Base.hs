@@ -87,6 +87,7 @@ module Agda.Interaction.Options.Base
     , lensOptFirstOrder
     , lensOptRequireUniqueMetaSolutions
     , lensOptPostfixProjections
+    , lensOptPostfixMethods
     , lensOptKeepPatternVariables
     , lensOptInferAbsurdClauses
     , lensOptInstanceSearchDepth
@@ -153,6 +154,7 @@ module Agda.Interaction.Options.Base
     , optFirstOrder
     , optRequireUniqueMetaSolutions
     , optPostfixProjections
+    , optPostfixMethods
     , optKeepPatternVariables
     , optInferAbsurdClauses
     , optBacktrackingInstances
@@ -325,6 +327,7 @@ optGuarded                   :: PragmaOptions -> Bool
 optFirstOrder                :: PragmaOptions -> Bool
 optRequireUniqueMetaSolutions :: PragmaOptions -> Bool
 optPostfixProjections        :: PragmaOptions -> Bool
+optPostfixMethods            :: PragmaOptions -> Bool
 optKeepPatternVariables      :: PragmaOptions -> Bool
 optInferAbsurdClauses        :: PragmaOptions -> Bool
 optBacktrackingInstances     :: PragmaOptions -> Bool
@@ -392,6 +395,7 @@ optFirstOrder                = collapseDefault . _optFirstOrder
 optRequireUniqueMetaSolutions = collapseDefault . _optRequireUniqueMetaSolutions && not . optFirstOrder
 -- --lossy-unification implies --no-require-unique-meta-solutions
 optPostfixProjections        = collapseDefault . _optPostfixProjections
+optPostfixMethods            = collapseDefault . _optPostfixMethods
 optKeepPatternVariables      = collapseDefault . _optKeepPatternVariables
 optInferAbsurdClauses        = collapseDefault . _optInferAbsurdClauses
 optBacktrackingInstances     = collapseDefault . _optBacktrackingInstances
@@ -579,6 +583,9 @@ lensOptRequireUniqueMetaSolutions f o = f (_optRequireUniqueMetaSolutions o) <&>
 
 lensOptPostfixProjections :: Lens' PragmaOptions _
 lensOptPostfixProjections f o = f (_optPostfixProjections o) <&> \ i -> o{ _optPostfixProjections = i }
+
+lensOptPostfixMethods :: Lens' PragmaOptions _
+lensOptPostfixMethods f o = f (_optPostfixMethods o) <&> \ i -> o{ _optPostfixMethods = i }
 
 lensOptKeepPatternVariables :: Lens' PragmaOptions _
 lensOptKeepPatternVariables f o = f (_optKeepPatternVariables o) <&> \ i -> o{ _optKeepPatternVariables = i }
@@ -861,6 +868,7 @@ recheckBecausePragmaOptionsChanged used current =
     , _optVerbose                   = empty
     , _optProfiling                 = empty
     , _optPostfixProjections        = empty
+    , _optPostfixMethods            = empty
     , _optCompileMain               = empty
     , _optCaching                   = empty
     , _optCountClusters             = empty
@@ -1735,6 +1743,9 @@ printerPragmaOptions = ("Checker output",) $ concat
   , pragmaFlag      "postfix-projections" lensOptPostfixProjections
                     "prefer postfix projection notation" ""
                     $ Just "prefer prefix projection notation"
+  , pragmaFlag      "postfix-methods" lensOptPostfixMethods
+                    "resolve postfix projection x .foo against x's whole record module, not just its fields" ""
+                    $ Just "resolve postfix projection x .foo against record fields only"
   , pragmaFlag      "keep-pattern-variables" lensOptKeepPatternVariables
                     "don't replace variables with dot patterns during case splitting" ""
                     $ Just "replace variables with dot patterns during case splitting"

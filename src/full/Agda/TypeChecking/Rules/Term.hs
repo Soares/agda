@@ -1461,16 +1461,56 @@ appViewM e = do
     A.ScopedExpr _ e -> go e
     A.App _ e1 e2
       | A.Dot _ e2' <- unScope $ namedArg e2
-      , Just (f0, hd) <- maybeProjTurnPostfix e2'
-      -> do
-       ai <- case getUnambiguous f0 of
-         Just f -> isProjection f >>= \case
-           Just p | isProperProjection_ p -> pure $ projArgInfo p
-           _ -> pure defaultArgInfo
-         Nothing -> pure defaultArgInfo
-       return (Application hd, singleton (unnamedArg ai e1))
+      -> goDot e1 e2 e2'
     A.App _ e1 arg -> second (`DL.snoc` arg) <$> go e1
     e -> return (Application e, mempty)
+
+  -- @e1 .e2'@: either a postfix projection (a record field), or, under
+  -- @--postfix-methods@, a postfix application of a non-field member of
+  -- @e1@'s record module (a \"method\").  Otherwise @.e2'@ is an ordinary
+  -- argument and we fall back to the generic application spine.
+  goDot e1 e2 e2'
+    | Just (f0, hd) <- maybeProjTurnPostfix e2' = do
+        ai <- case f0 of
+          A.AmbQ (f :| []) -> isProjection f >>= \case
+            Just p | isProperProjection_ p -> pure $ projArgInfo p
+            _ -> pure defaultArgInfo
+          _ -> pure defaultArgInfo
+        return (Application hd, singleton (unnamedArg ai e1))
+    -- A deferred bare postfix member (--postfix-methods): keep it as the head
+    -- and let application elaboration resolve it against e1's record type.
+    | pm@A.PostfixMember{} <- unScope e2' =
+        return (Application pm, singleton (defaultNamedArg e1))
+    | otherwise = recordMethodHead e2' >>= \case
+        Just (x, ai) -> return (Application (A.Def x), singleton (unnamedArg ai e1))
+        Nothing      -> second (`DL.snoc` e2) <$> go e1
+
+  -- Under @--postfix-methods@, for @x .foo@ where @foo@ resolves to a
+  -- (non-field) member of @x@'s record module, return that member and the
+  -- 'ArgInfo' of the record (\"self\") argument, read off the record module's
+  -- section telescope (self is its last entry).  The check that @x@'s type
+  -- really is that record happens later, during application elaboration.
+  recordMethodHead :: A.Expr -> TCM (Maybe (QName, ArgInfo))
+  recordMethodHead e0 =
+    ifM (optPostfixMethods <$> pragmaOptions)
+      (case unScope e0 of
+         A.Def x -> do
+           let m = qnameModule x
+           -- The parent module of @x@ is a record module iff a record /type/
+           -- of the same name exists.  Use the non-throwing lookup: the name
+           -- need not denote a definition at all (e.g. an ordinary top-level
+           -- module), in which case @x@ is not a record member.
+           getConstInfo' (mnameToQName m) >>= \case
+             Right _ -> isRecord (mnameToQName m) >>= \case
+               Just _  -> do
+                 tel <- lookupSection m
+                 return $ case reverse (telToList tel) of
+                   dom : _ -> Just (x, getArgInfo dom)
+                   []      -> Nothing
+               Nothing -> return Nothing
+             Left _ -> return Nothing
+         _ -> return Nothing)
+      (return Nothing)
 
 -- | Remove top layers of scope info of expression and set the scope accordingly
 --   in the 'TCState'.

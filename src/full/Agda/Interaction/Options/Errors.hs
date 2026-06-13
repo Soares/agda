@@ -235,6 +235,7 @@ data ErrorName
   | NotAllowedInDotPatterns_ NotAllowedInDotPatterns
   | NotAnExpression_
   | NotInScope_
+  | PostfixProjectionNotInRecordModule_
   | NotLeqSort_
   | NotValidBeforeField_
   | OverlappingProjects_

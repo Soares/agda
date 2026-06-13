@@ -749,9 +749,15 @@ toAbstractArgument e = do
     -- Andreas, 2025-07-15, issue #7954: do not allow parentheses around postfix projections.
     C.Dot kwr ex
       | null (getArgInfo e) -> do
-          -- @ex@ may only be an identifier
-          y <- toAbstractIdent ex $ fail InvalidDottedExpression
-          return (defaultNamedArg $ A.Dot (ExprRange $ getRange e) y, PreferParenless)
+          let r = ExprRange $ getRange e
+          -- @ex@ may only be an identifier.  Under @--postfix-methods@, an
+          -- unqualified name that does not resolve in scope is deferred to
+          -- type checking (resolved against the principal argument's record
+          -- module); see 'A.PostfixMember'.
+          y <- postfixMemberDefer ex >>= \case
+            Just x  -> return $ A.PostfixMember r x
+            Nothing -> toAbstractIdent ex $ fail InvalidDottedExpression
+          return (defaultNamedArg $ A.Dot r y, PreferParenless)
 
       -- Andreas, 2021-02-10, issue #3289: reject @e {.p}@ and @e ⦃ .p ⦄@.
       -- Raise an error if argument is a C.Dot with Hiding info.
@@ -764,6 +770,23 @@ toAbstractArgument e = do
   where
     fail :: TypeError -> ScopeM a
     fail = setCurrentRange e . typeError
+
+    -- @Just x@ if @x@ is an unqualified postfix name that should be resolved
+    -- type-directedly under @--postfix-methods@ (see 'A.PostfixMember').  We
+    -- defer /every/ unqualified postfix name, regardless of what it resolves
+    -- to in the ambient scope: @A .foo@ then means \"the member @foo@ of @A@'s
+    -- record module\" and nothing else, so its meaning is scope-insensitive
+    -- (a global or another record's @foo@ can never shadow it).  Qualified
+    -- names (@A .R.foo@) keep their ordinary resolution.
+    postfixMemberDefer :: C.Expr -> ScopeM (Maybe C.QName)
+    postfixMemberDefer = \case
+      C.Ident x        | Just _ <- C.isUnqualified x -> check x
+      C.KnownIdent _ x | Just _ <- C.isUnqualified x -> check x
+      _ -> return Nothing
+      where
+        check x = ifM (optPostfixMethods <$> pragmaOptions)
+          (return $ Just x)
+          (return Nothing)
 
 
 -- | Check an identifier in scope.

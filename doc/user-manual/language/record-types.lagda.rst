@@ -333,6 +333,44 @@ a function, or in postfix notation by adding a dot to the field name:
   sum-postfix : Pair Nat Nat → Nat
   sum-postfix p = p .Pair.fst + p .Pair.snd
 
+.. _postfix-methods:
+
+Postfix access to record-module members
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, the postfix form ``r .foo`` only works when ``foo`` is a
+*field* of ``r``'s record type. With the :option:`--postfix-methods` flag,
+``r .foo`` resolves ``foo`` against the entire *record module* of ``r``'s
+type — not just its fields, but any other definition in the ``record``
+block (a "method") — applying ``r`` as the record value:
+
+.. code-block:: agda
+
+  record Wrap (A : Set) : Set where
+    field
+      unwrap : A
+    -- A "method": a definition in the record module that is not a field.
+    applyTo : (A → A) → A
+    applyTo f = f unwrap
+
+  example : Wrap Nat → Nat
+  example w = w .applyTo suc        -- requires --postfix-methods
+
+Resolution is purely *type-directed*: the name after the dot is looked up
+**only** in the record module of the principal argument's type, never in the
+surrounding scope. As a result:
+
+* the record module need not be ``open``\ ed, and no qualification is needed;
+* the principal argument's type must already be known (``r .foo`` does not, on
+  its own, determine the type of ``r``; write ``foo r`` for that);
+* ``r .foo`` is an error if ``foo`` is not a member of that record module —
+  *even if* a definition named ``foo`` is in scope. A global ``foo`` can
+  never shadow, or be selected instead of, the record member.
+
+This applies to fields as well as methods, so under :option:`--postfix-methods`
+the meaning of ``r .foo`` depends only on ``r``'s type and the contents of the
+corresponding record module.
+
 It is also possible to pattern match against inductive
 records:
 

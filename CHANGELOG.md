@@ -11,6 +11,14 @@ Installation
 Pragmas and options
 -------------------
 
+* New option `--postfix-methods` generalizes postfix projection notation:
+  under it, `r .foo` resolves `foo` against the whole record module of
+  `r`'s type — any definition in the `record` block, not only its fields —
+  applying `r` as the record value. Resolution is purely type-directed
+  (`foo` is looked up only in that record module, never the surrounding
+  scope; `r`'s type must be known; `r .foo` is an error if `foo` is not a
+  member of it). Off by default.
+
 * New option `--parallel` (`-j` for short, as in `make`) lets Agda
   type-check imported modules in parallel. For large libraries, this can
   result in a speedup of ~3x, at the cost of roughly doubling the

@@ -94,6 +94,7 @@ instance BoundAndUsed Expr where
     QuestionMark{}            -> mempty
     Underscore{}              -> mempty
     Dot _ expr                -> boundAndUsed expr
+    PostfixMember{}           -> mempty
     App _ expr arg            -> boundAndUsed (expr, arg)
     WithApp _ expr exprs      -> boundAndUsed (expr, exprs)
     Lam _ bind expr           -> boundAndUsed (bind, expr)

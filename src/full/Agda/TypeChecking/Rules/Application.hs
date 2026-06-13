@@ -22,6 +22,7 @@ import Data.Maybe
 import Data.Void
 import qualified Data.Foldable as Fold
 import qualified Data.IntSet   as IntSet
+import qualified Data.Map      as Map
 
 import Agda.Interaction.Highlighting.Generate
   ( storeDisambiguatedConstructor, storeDisambiguatedProjection )
@@ -30,7 +31,9 @@ import qualified Agda.Syntax.Abstract as A
 import Agda.Syntax.Abstract.Pattern (patternToExpr)
 import Agda.Syntax.Abstract.Views as A
 import qualified Agda.Syntax.Info as A
+import qualified Agda.Syntax.Concrete as C
 import Agda.Syntax.Concrete.Pretty () -- only Pretty instances
+import Agda.Syntax.Scope.Base (AbstractName, allNamesInScope, scopeModules, anameName)
 import Agda.Syntax.Common
 import Agda.Syntax.Internal as I
 import Agda.Syntax.Position
@@ -240,6 +243,12 @@ checkApplication cmp hd args e t =
           let dom = a <$ domFromArg arg
           ExtendTel dom . Abs "x" <$>
             addContext ("x" :: String, dom) (metaTel args)
+
+    -- Subcase: deferred bare postfix member (--postfix-methods).  The name
+    -- @x@ did not resolve in scope; resolve it against the record module of
+    -- the principal argument's type, then re-check as an ordinary application.
+    A.PostfixMember _ x ->
+      checkPostfixMemberApp cmp e t x args
 
     -- Subcase: defined symbol or variable.
     _ -> do
@@ -1300,6 +1309,64 @@ checkUnambiguousProjectionApplication cmp e t x o hd args = do
       caseMaybeM (isProjection x) fallback $ \ pr -> do
         checkHeadApplication cmp e t hd (setArgInfo (projArgInfo pr) arg : rest)
     _ -> fallback
+
+-- | Check a deferred bare postfix member application @x .foo args@ under
+--   @--postfix-methods@, where @foo@ did not resolve in scope.  We infer the
+--   type of the principal argument @x@, require it to be a record type @R@,
+--   resolve @foo@ as a member of @R@'s module, and then re-check as the
+--   ordinary application @R.foo x args@ (with @x@ at the record argument).
+checkPostfixMemberApp :: Comparison -> A.Expr -> Type -> C.QName -> A.Args -> TCM Term
+checkPostfixMemberApp cmp e t x args = case args of
+  [] -> __IMPOSSIBLE__  -- appView always supplies the principal (record) argument
+  principal : rest -> do
+    -- Infer the principal (record) argument once, both to discover its record
+    -- type and to reuse the elaborated value (avoiding a second elaboration of
+    -- the principal expression).
+    (v0, pt) <- inferExpr (namedArg principal)
+    caseMaybeM (isRecordType pt) (typeError $ ShouldBeRecordType pt) $ \ (r, pars, _rdef) -> do
+      let m = qnameToMName r
+      caseMaybeM (lookupRecordModuleMember m x) (typeError $ PostfixProjectionNotInRecordModule x r) $ \ q -> do
+        -- @q@ lives in @r@'s record module, whose telescope is the record
+        -- parameters followed by the record value ("self").  Apply @q@ to the
+        -- parameters (from the principal's type) and the already-checked
+        -- principal as self; for an actual field this builds the canonical
+        -- postfix projection @v0 .q@.  Then check the remaining arguments.
+        def   <- getConstInfo q
+        mproj <- isRelevantProjection q
+        tel   <- lookupSection m
+        -- The record module's telescope is [parameters..., self].  The member
+        -- type @defType def@ abstracts over it, with the parameters hidden as
+        -- in the section (which may differ from how they appear in the record
+        -- type).  Re-tag the parameter values (from the principal's type) and
+        -- the principal with the hiding the member type expects, so the built
+        -- term passes --double-check.
+        let rel                 = getRelevance $ defArgInfo def
+            telDoms             = telToList tel
+            (parDoms, selfDoms) = splitAt (length telDoms - 1) telDoms
+            parArgs             = zipWith (\ d a -> Arg (getArgInfo d) (unArg a)) parDoms pars
+            selfInfo            = case selfDoms of
+              d : _ -> getArgInfo d
+              []    -> defaultArgInfo
+            headArgs = parArgs ++ [Arg selfInfo v0]
+            vhead    = case mproj of
+              Just p  -> projDropParsApply p ProjPostfix rel headArgs
+              Nothing -> Def q $ map Apply headArgs
+        thead <- piApplyM (defType def) headArgs
+        checkArguments cmp ExpandLast e rest thead t $ \ st ->
+          unfoldInlined =<< checkHeadConstraints (vhead `applyE`) st
+
+-- | Resolve an unqualified concrete name as a member of a (record) module,
+--   using the stored scope of that module.  Returns the member's 'QName'.
+lookupRecordModuleMember :: ModuleName -> C.QName -> TCM (Maybe QName)
+lookupRecordModuleMember m x = do
+  scope <- getScope
+  return $ case C.isUnqualified x of
+    Nothing -> Nothing
+    Just n  -> case Map.lookup m (scope ^. scopeModules) of
+      Nothing -> Nothing
+      Just s  -> case Map.lookup n (allNamesInScope s) :: Maybe (List1 AbstractName) of
+        Just (an :| _) -> Just (anameName an)
+        Nothing        -> Nothing
 
 -- | Inferring the type of an overloaded projection application.
 --   See 'inferOrCheckProjApp'.

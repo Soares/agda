@@ -150,6 +150,7 @@ exprToTerm e =
     A.QuestionMark{}   -> fail "hole"
     A.Underscore{}     -> fail "metavariable"
     A.Dot{}            -> fail "dotted expression"
+    A.PostfixMember{}  -> fail "postfix projection"
     A.Lam{}            -> fail "lambda"
     A.AbsurdLam{}      -> fail "lambda"
     A.ExtendedLam{}    -> fail "lambda"

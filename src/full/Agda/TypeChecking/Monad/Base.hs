@@ -5907,6 +5907,10 @@ data TypeError
         | CopatternHeadNotProjection C.QName
         | NotAllowedInDotPatterns NotAllowedInDotPatterns
         | NotInScope C.QName
+        | PostfixProjectionNotInRecordModule C.QName QName
+            -- ^ Under @--postfix-methods@, the name in a postfix projection
+            --   @x .foo@ (here the @C.QName@) is not a member of the record
+            --   module of @x@'s type (the record type @QName@).
         | NoSuchModule C.QName
         | AmbiguousName C.QName AmbiguousNameReason
         | AmbiguousModule C.QName (List1 A.ModuleName)

@@ -1,0 +1,3 @@
+PostfixMethodsNotRecord.agda:10.7-13: error: [ShouldBeRecordType]
+Expected non-abstract record type, found N
+when checking that the expression z .foo has type N

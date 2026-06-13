@@ -252,6 +252,7 @@ instance Hilite A.Expr where
       A.QuestionMark _mi _ii        -> mempty
       A.Underscore _mi              -> mempty
       A.Dot _r e                    -> hl e                   -- TODO? Projection?
+      A.PostfixMember _r _x         -> mempty                 -- unresolved; resolved during type checking
       A.App _r e es                 -> hl e <> hl es
       A.WithApp _r e es             -> hl e <> hl es
       A.Lam _r bs e                 -> hl bs <> hl e

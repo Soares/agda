@@ -189,6 +189,7 @@ typeErrorName = \case
   NoSuchPrimitiveFunction                                    {} -> NoSuchPrimitiveFunction_
   NotAnExpression                                            {} -> NotAnExpression_
   NotInScope                                                 {} -> NotInScope_
+  PostfixProjectionNotInRecordModule                         {} -> PostfixProjectionNotInRecordModule_
   NotLeqSort                                                 {} -> NotLeqSort_
   NotValidBeforeField                                        {} -> NotValidBeforeField_
   OverlappingProjects                                        {} -> OverlappingProjects_

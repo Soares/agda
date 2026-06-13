@@ -101,6 +101,11 @@ data Expr
   | Underscore   MetaInfo
     -- ^ Meta variable for hidden argument (must be inferred locally).
   | Dot ExprInfo Expr                  -- ^ @.e@, for postfix projection.
+  | PostfixMember ExprInfo C.QName
+    -- ^ @.x@ in argument position where @x@ did not resolve in scope.
+    --   Under @--postfix-methods@ it is resolved against the record module
+    --   of the principal argument's type during type checking (a postfix
+    --   application of a record-module member that is not a field).
   | App  AppInfo Expr (NamedArg Expr)  -- ^ Ordinary (binary) application.
   | WithApp ExprInfo Expr (List1 Expr) -- ^ With application.
   | Lam  ExprInfo LamBinding Expr      -- ^ @λ bs → e@.
@@ -606,6 +611,7 @@ instance Eq Expr where
   QuestionMark a1 b1         == QuestionMark a2 b2         = (a1, b1) == (a2, b2)
   Underscore a1              == Underscore a2              = a1 == a2
   Dot r1 e1                  == Dot r2 e2                  = (r1, e1) == (r2, e2)
+  PostfixMember r1 x1        == PostfixMember r2 x2        = (r1, x1) == (r2, x2)
   App a1 b1 c1               == App a2 b2 c2               = (a1, b1, c1) == (a2, b2, c2)
   WithApp a1 b1 c1           == WithApp a2 b2 c2           = (a1, b1, c1) == (a2, b2, c2)
   Lam a1 b1 c1               == Lam a2 b2 c2               = (a1, b1, c1) == (a2, b2, c2)
@@ -690,6 +696,7 @@ instance HasRange Expr where
     getRange (QuestionMark i _)         = getRange i
     getRange (Underscore  i)            = getRange i
     getRange (Dot i _)                  = getRange i
+    getRange (PostfixMember i _)        = getRange i
     getRange (App i _ _)                = getRange i
     getRange (WithApp i _ _)            = getRange i
     getRange (Lam i _ _)                = getRange i
@@ -827,6 +834,7 @@ instance KillRange Expr where
   killRange (QuestionMark i ii)          = killRangeN QuestionMark i ii
   killRange (Underscore  i)              = killRangeN Underscore i
   killRange (Dot i e)                    = killRangeN Dot i e
+  killRange (PostfixMember i x)          = killRangeN PostfixMember i x
   killRange (App i e1 e2)                = killRangeN App i e1 e2
   killRange (WithApp i e es)             = killRangeN WithApp i e es
   killRange (Lam i b e)                  = killRangeN Lam i b e
@@ -1118,6 +1126,7 @@ instance SubstExpr Expr where
     -- The below cannot appear in pattern synonym right-hand sides
     QuestionMark{}   -> __IMPOSSIBLE__
     Dot{}            -> __IMPOSSIBLE__
+    PostfixMember{}  -> __IMPOSSIBLE__
     WithApp{}        -> __IMPOSSIBLE__
     Lam{}            -> __IMPOSSIBLE__
     AbsurdLam{}      -> __IMPOSSIBLE__
