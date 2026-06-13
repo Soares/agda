@@ -2918,27 +2918,40 @@ tbindNames = \case
   C.TLet{}       -> []
 
 -- | Decompose a type's target into its head and the (raw) arguments.
---   Re-parsing the raw application tells us whether the head is
---   captured by an infix operator (in which case we give up).
+--   Re-parsing the raw application resolves mixfix notation, so the
+--   head is recovered whether the target is a prefix application
+--   (@R a b@) or captured by an infix\/mixfix operator
+--   (@a [P]> b@, head @_[P]>_@).
 targetParts :: C.Expr -> MaybeT ScopeM (C.QName, [C.Expr])
 targetParts = \case
   C.Ident q   -> pure (q, [])
   C.Paren _ e -> targetParts e
-  C.RawApp _ es@(List2 e1 e2 rest)
-    | C.Ident q <- e1 -> do
+  C.RawApp _ es -> do
         parsed <- MaybeT $ (Just <$> parseApplication es)
                     `catchError` \ _ -> pure Nothing
         case appHead parsed of
-          Just q' | q' == q -> pure (q, e2 : rest)
-          _                 -> mzero
+          Just q' -> pure (q', appArgs parsed)
+          Nothing -> mzero
   _ -> mzero
   where
+    -- A mixfix/infix operator application parses to a 'C.OpApp' whose
+    -- head 'QName' is the operator (@_[P]>_@); a prefix application is
+    -- an 'App' spine rooted at an 'Ident'.
     appHead :: C.Expr -> Maybe C.QName
     appHead = \case
-      C.App _ f _ -> appHead f
-      C.Paren _ e -> appHead e
-      C.Ident q   -> Just q
-      _           -> Nothing
+      C.App _ f _      -> appHead f
+      C.Paren _ e      -> appHead e
+      C.Ident q        -> Just q
+      C.OpApp _ q _ _  -> Just q
+      _                -> Nothing
+
+    appArgs :: C.Expr -> [C.Expr]
+    appArgs = go []
+      where
+        go acc = \case
+          C.App _ f a -> go (namedArg a : acc) f
+          C.Paren _ e -> go acc e
+          _           -> acc
 
 -- | Run a module-synonym generator only when the binder\/signature was
 --   marked with the @module@ keyword (fork feature); otherwise nothing.
