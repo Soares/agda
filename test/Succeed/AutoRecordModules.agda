@@ -284,3 +284,8 @@ walkTwo (A : Magma) a = step (a A.∘ a) stop
 data SepWalk (A : Magma) : A.Carrier → Set
 data SepWalk B where
   sep : (b : B.Carrier) → SepWalk B b
+
+-- Hidden ascriptions give clause-scoped module synonyms too
+-- (dogfooding blocker: f {S1 : Spec} ... in WildBracket).
+hidSyn : ∀ {A : Magma} → Magma.Carrier A → Magma.Carrier A
+hidSyn {A : Magma} x = x A.∘ x
