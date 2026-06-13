@@ -52,3 +52,18 @@ asMatch (z@zero    : Nat) = z
 -- Ascribed binders in using statements.
 viaUsing : Nat → Nat
 viaUsing k using (n : Nat) ← suc k = n + n
+
+-- Hidden and instance arguments can also be type-ascribed binders.
+hidAsc : {n : Nat} → Nat
+hidAsc {n : Nat} = n
+
+instAsc : ⦃ b : Bool ⦄ → Bool
+instAsc {{b : Bool}} = b
+
+-- Several names in one pair of braces give one hidden argument each.
+twoHid : {n m : Nat} → Nat
+twoHid {n m : Nat} = n + m
+
+-- As-binders inside hidden ascriptions.
+hidAs : {n : Nat} → Nat
+hidAs {n@m : Nat} = n + m

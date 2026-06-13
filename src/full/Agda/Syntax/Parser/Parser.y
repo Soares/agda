@@ -85,7 +85,11 @@ import Agda.Utils.Impossible
 %monad { Parser }
 %lexer { lexer } { TokEOF{} }
 
-%expect 7
+%expect 9
+-- * 2 shift/reduce for "Application . ':'" inside parens and braces
+--   (Expr4 ascriptions vs binder lists): shifting parses (x : T) and
+--   {x : T} as type-ascribed binders ('Ann'); before an arrow,
+--   mkFunOrPi rebuilds the dependent function space from them.
 -- * shift/reduce for \ x y z -> foo = bar
 --   shifting means it'll parse as \ x y z -> (foo = bar) rather than
 --   (\ x y z -> foo) = bar
@@ -659,11 +663,11 @@ PragmaQNames1 : PragmaQName PragmaQNames { $1:$2 }
 Expr :: { Expr }
 Expr
   : TeleArrow Expr                      { Pi $1 $2 }
-  | Application3 '->' Expr              { Fun (getRange ($1,$2,$3))
-                                              (defaultArg $ rawApp $1)
-                                              $3 }
+  | Application3 '->' Expr              { mkFunOrPi (getRange ($1,$2,$3))
+                                                    (defaultArg $ rawApp $1)
+                                                    $3 }
   | Attributes1 Application3 '->' Expr  {% applyAttrsDropTactic $1 (defaultArg $ rawApp $2) <&> \ dom ->
-                                             Fun (getRange ($1,$2,$3,$4)) dom $4 }
+                                             mkFunOrPi (getRange ($1,$2,$3,$4)) dom $4 }
   | Expr1 %prec LOWEST                  { $1 }
 
 {-
@@ -809,10 +813,14 @@ RecordUpdate
     | 'record' Expr3NoCurly 'where' Declarations0
       { RecUpdateWhere (kwRange $1) (getRange ($1,$2,$3,$4)) $2 $4 }
 
--- Level 4: Maybe named, or cubical faces
+-- Level 4: Maybe named, or cubical faces, or type-ascribed binders.
+-- Ascriptions @x y : T@ are only valid inside hidden/instance braces
+-- and parentheses: as dependent domains before an arrow (repaired
+-- into a Pi telescope by 'mkFunOrPi') or as LHS binder patterns.
 Expr4 :: { Expr }
-Expr4 : Expr1 '=' Expr { Equal (getRange ($1, $2, $3)) $1 $3 }
-      | Expr           { $1 }
+Expr4 : Expr1 '=' Expr       { Equal (getRange ($1, $2, $3)) $1 $3 }
+      | Application ':' Expr {% mkAscriptionExpr (getRange ($1, $2, $3)) $1 $3 }
+      | Expr                 { $1 }
 
 ExprOrAttr :: { Expr }
 ExprOrAttr
@@ -1255,7 +1263,8 @@ LHSApplication3R
     | LHSAtom_P(RecordUpdate) LHSApplication3R { $1 <> $2 }
 
 -- An ascription atom @(x y : T)@ expands to one 'Ann' expression per
--- name, hence atoms produce lists.
+-- name, hence atoms produce lists.  Hidden and instance ascriptions
+-- @{x : T}@ / @{{x : T}}@ parse via the brace content ('Expr4').
 LHSAtom_P(recordUpdate)
     : Expr3_P(recordUpdate)   { singleton $1 }
     | '(' TBindWithHiding ')' {% mkAscriptions (getRange ($1,$2,$3)) $2 }

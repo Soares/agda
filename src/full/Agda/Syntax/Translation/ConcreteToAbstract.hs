@@ -872,9 +872,11 @@ instance ToAbstract C.Expr where
   -- Names
       C.Ident x -> toAbstract (OldQName x Nothing)
 
-  -- Type-ascribed pattern variables only exist inside left hand sides
-  -- and are eliminated by the pattern translation in the parser.
-      C.Ann{} -> __IMPOSSIBLE__
+  -- Type-ascribed pattern variables only make sense inside left hand
+  -- sides, where the pattern translation eliminates them.  The parser
+  -- also accepts them in hidden/instance arguments of expressions
+  -- (e.g. @g {x : T}@ on a right hand side), which is an error.
+      e@C.Ann{} -> notAnExpression e
       C.KnownIdent _ x -> toAbstract (OldQName x Nothing)
       -- Just discard the syntax highlighting information.
 

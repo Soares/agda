@@ -502,7 +502,35 @@ buildDoStmt e cs = defaultBuildDoStmt e cs
 
 -- | Turn an expression into a left hand side.
 exprToLHS :: Expr -> Parser ([RewriteEqn] -> [WithExpr] -> LHS)
-exprToLHS e = LHS <$> exprToPattern e
+exprToLHS e = LHS <$> exprToPattern (spreadAscriptions e)
+
+-- | Flatten ascription groups parsed via the bracket content grammar
+--   (see 'mkAscriptionExpr') into the atom shapes the left hand side
+--   machinery expects: @(x y : T)@ becomes one bare 'Ann' atom per
+--   name, @{x y : T}@ one hidden 'Ann' atom per name, and similarly
+--   for instance braces.  Only the top application spine is affected.
+spreadAscriptions :: Expr -> Expr
+spreadAscriptions = \case
+  WithApp r e es -> WithApp r (spreadAscriptions e) es
+  RawApp _ es    -> rawApp $ List2.toList1 es >>= List1.fromListSafe __IMPOSSIBLE__ . spread
+  e              -> e
+  where
+    spread :: Expr -> [Expr]
+    spread e = case e of
+      Paren _ inner
+        | Just anns <- asAnns inner -> anns
+      HiddenArg ra (Named Nothing inner)
+        | Just anns <- asAnns inner -> map (HiddenArg ra . unnamed) anns
+      InstanceArg ra (Named Nothing inner)
+        | Just anns <- asAnns inner -> map (InstanceArg ra . unnamed) anns
+      _ -> [e]
+
+    asAnns :: Expr -> Maybe [Expr]
+    asAnns = \case
+      a@Ann{}     -> Just [a]
+      RawApp _ es -> mapM (\case { a@Ann{} -> Just a ; _ -> Nothing }) $
+                       List2.toList es
+      _           -> Nothing
 
 -- | Turn an expression into a pattern. Fails if the expression is not a
 --   valid pattern.
@@ -510,6 +538,74 @@ exprToPattern :: Expr -> Parser Pattern
 exprToPattern e = case C.isPattern e of
   Nothing -> parseErrorRange e $ "Not a valid pattern: " ++ prettyShow e
   Just p  -> pure p
+
+-- | Interpret @x y : T@ inside hidden/instance braces (or
+--   parentheses) as type-ascribed binders: one 'Ann' per name, several
+--   joined in a 'RawApp'.  Valid before an arrow (where 'mkFunOrPi'
+--   turns them into a Pi telescope) and -- for a single binder -- as a
+--   hidden or instance binder pattern on a left hand side,
+--   e.g. @f {x : T} = ...@.
+mkAscriptionExpr :: Range -> List1 Expr -> Expr -> Parser Expr
+mkAscriptionExpr r es t = do
+  anns <- forM es \ e -> case exprAsNameAndPattern e of
+    Nothing -> parseErrorRange e $
+      "Not a valid type-ascribed binder: " ++ prettyShow e
+    Just (n, me) -> do
+      p <- traverse exprToPattern me
+      pure $ Ann r (Binder p UserBinderName (mkBoundName_ n)) t
+  pure $ rawApp anns
+
+-- | Build a function space from the domain before @'->'@.  Ascribed
+--   binders @{x y : T}@ / @{{x : T}}@ / @(x y : T)@ parse as 'Ann's
+--   inside their bracketing (see 'mkAscriptionExpr'), but before an
+--   arrow they are dependent binders: rebuild the domain as a Pi
+--   telescope.
+mkFunOrPi :: Range -> Arg Expr -> Expr -> Expr
+mkFunOrPi r dom@(Arg _ e) b = case mapM annBinder (asAtoms e) of
+  Just (tb : tbs) -> Pi (tb :| tbs) b
+  _               -> Fun r dom b
+  where
+    asAtoms (RawApp _ es) = List2.toList es
+    asAtoms e'            = [e']
+
+    annBinder = \case
+      HiddenArg   ra (Named Nothing inner) ->
+        mkTB ra (hide . defaultNamedArg) inner
+      InstanceArg ra (Named Nothing inner) ->
+        mkTB ra (makeInstance . defaultNamedArg) inner
+      Paren       ra inner ->
+        parenBinder ra inner
+      -- Irrelevance-dotted binders @.(x : T)@, @.{x : T}@ etc.
+      Dot kwr (Paren ra inner) ->
+        makeIrrelevant kwr <$> parenBinder ra inner
+      Dot kwr (HiddenArg ra (Named Nothing inner)) ->
+        makeIrrelevant kwr <$> mkTB ra (hide . defaultNamedArg) inner
+      Dot kwr (InstanceArg ra (Named Nothing inner)) ->
+        makeIrrelevant kwr <$> mkTB ra (makeInstance . defaultNamedArg) inner
+      DoubleDot kwr (Paren ra inner) ->
+        makeShapeIrrelevant kwr <$> parenBinder ra inner
+      DoubleDot kwr (HiddenArg ra (Named Nothing inner)) ->
+        makeShapeIrrelevant kwr <$> mkTB ra (hide . defaultNamedArg) inner
+      DoubleDot kwr (InstanceArg ra (Named Nothing inner)) ->
+        makeShapeIrrelevant kwr <$> mkTB ra (makeInstance . defaultNamedArg) inner
+      _ -> Nothing
+
+    -- A parenthesized group: a binder, or a @(let ...)@ telescope
+    -- binding interleaved with the binders.
+    parenBinder ra = \case
+      Let lr ds Nothing -> Just $ TLet (fuseRange ra lr) ds
+      inner             -> mkTB ra defaultNamedArg inner
+
+    -- The bracket content: one 'Ann', or several in a 'RawApp', all
+    -- sharing the same type.
+    mkTB ra f inner = do
+      anns <- mapM unAnn (asAtoms inner)
+      case anns of
+        (b1, t) : bs -> Just $ TBind ra (fmap f (b1 :| map fst bs)) t
+        []           -> Nothing
+      where
+        unAnn (Ann _ bnd t) = Just (bnd, t)
+        unAnn _             = Nothing
 
 -- | Interpret a parenthesized typed binding @(x y : T)@ as a sequence of
 --   type-ascribed pattern variables (one 'Ann' per name).  Used for LHS
