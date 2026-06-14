@@ -85,11 +85,7 @@ import Agda.Utils.Impossible
 %monad { Parser }
 %lexer { lexer } { TokEOF{} }
 
-%expect 9
--- * 2 shift/reduce for "Application . ':'" inside parens and braces
---   (Expr4 ascriptions vs binder lists): shifting parses (x : T) and
---   {x : T} as type-ascribed binders ('Ann'); before an arrow,
---   mkFunOrPi rebuilds the dependent function space from them.
+%expect 7
 -- * shift/reduce for \ x y z -> foo = bar
 --   shifting means it'll parse as \ x y z -> (foo = bar) rather than
 --   (\ x y z -> foo) = bar
@@ -819,7 +815,6 @@ RecordUpdate
 -- into a Pi telescope by 'mkFunOrPi') or as LHS binder patterns.
 Expr4 :: { Expr }
 Expr4 : Expr1 '=' Expr       { Equal (getRange ($1, $2, $3)) $1 $3 }
-      | Application ':' Expr {% mkAscriptionExpr (getRange ($1, $2, $3)) $1 $3 }
       | Expr                 { $1 }
 
 ExprOrAttr :: { Expr }
@@ -1219,12 +1214,10 @@ CommaImportNames1
 LHS :: { [RewriteEqn] -> [WithExpr] -> LHS }
 LHS : LHSExpr1 {% exprToLHS $1 }
 
--- LHS expressions: a copy of the Expr1_P(NoRecordUpdate) hierarchy
--- that additionally allows type-ascribed binders @(x y : T)@ as
--- application atoms.  Ascriptions cannot be allowed in general
--- expressions: after @'(' TBindWithHiding ')'@ an LALR(1) parser
--- cannot know whether a telescope follows (Pi type) or not
--- (ascription atom); only in LHS spines no telescope can occur.
+-- LHS expressions: a copy of the Expr1_P(NoRecordUpdate) hierarchy.
+-- It is kept as a dedicated spine so that binder atoms reachable only
+-- in left-hand-side position (e.g. the @(module A : R)@ module-synonym
+-- binder) can be added here without affecting general expressions.
 LHSExpr1 :: { Expr }
 LHSExpr1
   : LHSWithExprs
@@ -1244,12 +1237,9 @@ LHSApplication
     : Expr2_P(NoRecordUpdate)                   { singleton $1 }
     | LHSAtom_P(NoRecordUpdate) LHSApplicationR { $1 <> $2 }
 
--- Like 'Application', but allowing ascription atoms.  An ascription
--- can also be the last atom of the spine, hence the extra base case.
 LHSApplicationR :: { List1 Expr }
 LHSApplicationR
     : Expr2_P(RecordUpdate)                   { singleton $1 }
-    | '(' TBindWithHiding ')'                 {% mkAscriptions (getRange ($1,$2,$3)) $2 }
     | LHSAtom_P(RecordUpdate) LHSApplicationR { $1 <> $2 }
 
 LHSApplication3 :: { List1 Expr }
@@ -1262,12 +1252,8 @@ LHSApplication3R
     : LHSAtom_P(RecordUpdate)                  { $1 }
     | LHSAtom_P(RecordUpdate) LHSApplication3R { $1 <> $2 }
 
--- An ascription atom @(x y : T)@ expands to one 'Ann' expression per
--- name, hence atoms produce lists.  Hidden and instance ascriptions
--- @{x : T}@ / @{{x : T}}@ parse via the brace content ('Expr4').
 LHSAtom_P(recordUpdate)
     : Expr3_P(recordUpdate)   { singleton $1 }
-    | '(' TBindWithHiding ')' {% mkAscriptions (getRange ($1,$2,$3)) $2 }
 
 -- The expressions of a @using@ statement: like 'UnnamedWithExprs', but
 -- allowing type-ascribed binders @(x : T)@ left of the arrow (they are
@@ -1280,7 +1266,6 @@ UsingExprs
 UsingApplication :: { List1 Expr }
 UsingApplication
     : Expr2_P(RecordUpdate)                    { singleton $1 }
-    | '(' TBindWithHiding ')'                  {% mkAscriptions (getRange ($1,$2,$3)) $2 }
     | LHSAtom_P(RecordUpdate) UsingApplication { $1 <> $2 }
 
 UsingApplication3 :: { List1 Expr }
