@@ -1,0 +1,33 @@
+ModuleSynonymInDefParam.agda:17.19-20: warning: -W[no]InvalidDataOrRecDefParameter
+Ignoring `module` synonym marker in data definition (annotate the
+signature parameter instead)
+
+ModuleSynonymInDefParam.agda:17.23-28: warning: -W[no]InvalidDataOrRecDefParameter
+Ignoring parameter type in data definition (note: parameters may
+not repeat information from signature)
+
+ModuleSynonymInDefParam.agda:23.21-22: warning: -W[no]InvalidDataOrRecDefParameter
+Ignoring `module` synonym marker in record definition (annotate the
+signature parameter instead)
+
+ModuleSynonymInDefParam.agda:23.25-30: warning: -W[no]InvalidDataOrRecDefParameter
+Ignoring parameter type in record definition (note: parameters may
+not repeat information from signature)
+
+———— All done; warnings encountered ————————————————————————
+
+ModuleSynonymInDefParam.agda:17.19-20: warning: -W[no]InvalidDataOrRecDefParameter
+Ignoring `module` synonym marker in data definition (annotate the
+signature parameter instead)
+
+ModuleSynonymInDefParam.agda:17.23-28: warning: -W[no]InvalidDataOrRecDefParameter
+Ignoring parameter type in data definition (note: parameters may
+not repeat information from signature)
+
+ModuleSynonymInDefParam.agda:23.21-22: warning: -W[no]InvalidDataOrRecDefParameter
+Ignoring `module` synonym marker in record definition (annotate the
+signature parameter instead)
+
+ModuleSynonymInDefParam.agda:23.25-30: warning: -W[no]InvalidDataOrRecDefParameter
+Ignoring parameter type in record definition (note: parameters may
+not repeat information from signature)
