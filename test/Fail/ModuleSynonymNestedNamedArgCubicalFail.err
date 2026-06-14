@@ -1,0 +1,4 @@
+ModuleSynonymNestedNamedArgCubicalFail.agda:10.10: error: [ParseError]
+Not a valid named argument value: expected an expression, got an equality.
+Hint: for a module-synonym pattern write `{x = y with T module}`;
+      for a plain name binding write `{x = y}`.

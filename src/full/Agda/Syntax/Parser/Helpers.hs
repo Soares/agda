@@ -638,7 +638,17 @@ maybeNamed e =
     Equal _ e1 e2 -> do
       let succeed x = return $ named (WithOrigin UserWritten $ Ranged (getRange e1) x) e2
       case e1 of
-        Ident (QName x) -> succeed $ nameToRawName x
+        Ident (QName x) -> do
+          -- Reject {x = y = z}: the grammar change that allows the
+          -- module-ascription form {x = y with T module} on the RHS of a
+          -- named argument (Expr4 instead of Expr) also makes {x = y = z}
+          -- syntactically reachable.  Catch it here before elaboration.
+          case e2 of
+            Equal{} -> parseErrorRange e2
+              "Not a valid named argument value: expected an expression, got an equality.\n\
+              \Hint: for a module-synonym pattern write `{x = y with T module}`;\n\
+              \      for a plain name binding write `{x = y}`."
+            _ -> succeed $ nameToRawName x
         -- We could have the following, but names of arguments cannot be _.
         -- Underscore{}    -> succeed $ "_"
         _ -> parseErrorRange e $ "Not a valid named argument: " ++ prettyShow e
