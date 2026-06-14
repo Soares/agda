@@ -85,7 +85,10 @@ import Agda.Utils.Impossible
 %monad { Parser }
 %lexer { lexer } { TokEOF{} }
 
-%expect 7
+%expect 8
+-- * 1 shift/reduce for "(module Application . ':'": the `module`-marked
+--   binder atom vs the surrounding LHS reduce; shifting parses
+--   (module x : T) as a synonym-requesting ascription.
 -- * shift/reduce for \ x y z -> foo = bar
 --   shifting means it'll parse as \ x y z -> (foo = bar) rather than
 --   (\ x y z -> foo) = bar
