@@ -580,7 +580,7 @@ warningNameDescription = \case
   -- TODO: linearity
   -- FixingQuantity_                  -> "Correcting invalid user-written quantity."
   FixingRelevance_                 -> "Correcting invalid user-written relevance attribute."
-  NoRecordModuleSynonym_           -> "No module synonym could be generated for a record-targeted name (--auto-record-modules)."
+  NoRecordModuleSynonym_           -> "No module synonym could be generated for a `module`-marked binder."
   FixingCohesion_                  -> "Correcting invalid user-written cohesion attribute."
   FixingPolarity_                  -> "Correcting invalid user-written polarity attribute."
   MisplacedRewrite_                -> "Ignoring invalid user-written local rewrite attribute."
