@@ -814,7 +814,7 @@ RecordUpdate
 -- and parentheses: as dependent domains before an arrow (repaired
 -- into a Pi telescope by 'mkFunOrPi') or as LHS binder patterns.
 Expr4 :: { Expr }
-Expr4 : Expr1 '=' Expr       { Equal (getRange ($1, $2, $3)) $1 $3 }
+Expr4 : Expr1 '=' Expr4      { Equal (getRange ($1, $2, $3)) $1 $3 }
       | Application 'with' Expr 'module' {% mkModuleAscriptionExpr (getRange ($1, $2, $3, $4)) $1 $3 }
       | Expr                 { $1 }
 
