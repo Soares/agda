@@ -815,7 +815,7 @@ RecordUpdate
 -- into a Pi telescope by 'mkFunOrPi') or as LHS binder patterns.
 Expr4 :: { Expr }
 Expr4 : Expr1 '=' Expr       { Equal (getRange ($1, $2, $3)) $1 $3 }
-      | Application 'with' 'module' ':' Expr {% mkModuleAscriptionExpr (getRange ($1, $2, $3, $4, $5)) $1 $5 }
+      | Application 'with' Expr 'module' {% mkModuleAscriptionExpr (getRange ($1, $2, $3, $4)) $1 $3 }
       | Expr                 { $1 }
 
 ExprOrAttr :: { Expr }
