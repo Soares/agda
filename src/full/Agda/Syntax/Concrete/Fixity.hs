@@ -222,8 +222,8 @@ declaresName x = declaresNames [x]
 --   i.e., do not go into modules.
 declaredNames :: Declaration -> DeclaredNames
 declaredNames = \case
-  TypeSig _ _ x _       -> declaresName x
-  FieldSig _ _ x _      -> declaresName x
+  TypeSig _ _ x _ _     -> declaresName x
+  FieldSig _ _ x _ _    -> declaresName x
   Field _ fs            -> foldMap declaredNames fs
   FunClause _ (LHS p [] []) _ _ _
     | IdentP _ (QName x) <- removeParenP p

@@ -93,7 +93,6 @@ defaultPragmaOptions = PragmaOptions
   , _optFirstOrder                 = Default
   , _optRequireUniqueMetaSolutions = Default
   , _optPostfixProjections         = Default
-  , _optAutoRecordModules          = Default
   , _optKeepPatternVariables       = Default
   , _optInferAbsurdClauses         = Default
   , _optInstanceSearchDepth        = 500

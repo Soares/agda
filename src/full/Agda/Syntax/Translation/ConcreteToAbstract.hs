@@ -179,7 +179,7 @@ recordConstructorType params decls =
           mkLet d = (:[]) . A.TLet r <$> scopeCheckLetDef RecordLetDef d
       setCurrentRange r $ case d of
 
-        C.NiceField r pr ab inst tac x (Arg ai t) -> do
+        C.NiceField r pr ab inst tac x (Arg ai t) syn -> do
           fx  <- getConcreteFixity x
           ai  <- checkFieldArgInfo True ai
           let bv = Arg ai $ unnamed $ C.mkBinder $ (C.mkBoundName x fx) { bnameTactic = tac }
@@ -187,9 +187,9 @@ recordConstructorType params decls =
           -- Let-bound module synonym for a record-headed field
           -- (--auto-record-modules), in scope in the later field types.
           -- Quiet: the second pass over the fields warns.
-          syn <- autoRecordFieldSynonym QuietNoSynonym ai x t $
+          msyn <- whenSynonym syn $ autoRecordFieldSynonym QuietNoSynonym ai x $
             fmap (A.TLet r . singleton) <$> autoRecordLetSynonymQuiet x t
-          return $ maybeToList tb ++ maybeToList syn
+          return $ maybeToList tb ++ maybeToList msyn
 
         -- Public open is allowed and will take effect when scope checking as
         -- proper declarations.
@@ -202,7 +202,7 @@ recordConstructorType params decls =
         -- Do some rudimentary matching here to get NotValidBeforeField instead
         -- of NotAValidLetDecl.
         C.NiceMutual _ _ _ _
-          ( C.FunSig _ _ _ _ macro _ _ _ _ _
+          ( C.FunSig _ _ _ _ macro _ _ _ _ _ _
           :| [ C.FunDef _ _ abstract _ _ _ _
              (C.Clause _ _ _ (C.LHS _p [] []) (C.RHS _) NoWhere [] :| [])
           ]) | abstract /= AbstractDef && macro /= MacroDef -> do
@@ -1015,14 +1015,11 @@ instance ToAbstract C.Expr where
       e0@(C.Pi tel e) -> do
         let info = ExprRange (getRange e0)
         lvars0 <- getLocalVars
-        -- Auto record module synonyms (--auto-record-modules): a
-        -- record-typed binder (A : R) makes the module synonym A
-        -- available in the rest of the telescope and the codomain, by
-        -- splitting the Pi after the binder and inserting a let-bound
-        -- module.
-        recs <- ifM (optAutoRecordModules <$> pragmaOptions)
-          (mapM tbRecordHeaded $ List1.toList tel)
-          (return $ map (const False) $ List1.toList tel)
+        -- Module synonyms: a @module@-marked binder @(module A : R)@ makes
+        -- the synonym @A@ available in the rest of the telescope and the
+        -- codomain, by splitting the Pi after the binder and inserting a
+        -- let-bound module.
+        let recs = map tbHasSynonym $ List1.toList tel
         if not (or recs) then do
           localToAbstract tel $ \tel -> do
             lvars1 <- getLocalVars
@@ -1052,9 +1049,9 @@ instance ToAbstract C.Expr where
                   return $ A.mkPi info (catMaybes chunk') body'
           go $ zip (List1.toList tel) recs
         where
-          tbRecordHeaded = \case
-            C.TBind _ _ ty -> recordHeadedType ty
-            C.TLet{}       -> return False
+          tbHasSynonym = \case
+            C.TBind _ xs _ -> any ((== SynonymBinder) . C.binderModuleSynonym . namedArg) xs
+            C.TLet{}       -> False
 
   -- Let
       e0@(C.Let _ ds (Just e)) ->
@@ -1298,7 +1295,7 @@ instance ToAbstract c => ToAbstract (FieldAssignment' c) where
 instance ToAbstract (C.Binder' (NewName C.BoundName)) where
   type AbsOfCon (C.Binder' (NewName C.BoundName)) = A.Binder
 
-  toAbstract (C.Binder p o n) = do
+  toAbstract (C.Binder p o _syn n) = do
     let name = C.boundName $ newName n
 
     -- If we do have a pattern then the variable needs to be inserted
@@ -1470,7 +1467,7 @@ class EnsureNoLetStms a where
   ensureNoLetStms = traverse_ ensureNoLetStms
 
 instance EnsureNoLetStms C.Binder where
-  ensureNoLetStms arg@(C.Binder p _ n) =
+  ensureNoLetStms arg@(C.Binder p _ _ n) =
     when (isJust p) $ typeError $ IllegalPatternInTelescope arg
 
 instance EnsureNoLetStms C.TypedBinding where
@@ -1764,7 +1761,7 @@ checkLetDefInfo wh access macro abstract = do
 scopeCheckLetDef :: LetDefOrigin -> NiceDeclaration -> ScopeM (List1 A.LetBinding)
 scopeCheckLetDef wh d = setCurrentRange d do
   case d of
-    NiceMutual _ _ _ _ d@(C.FunSig _ access _ instanc macro info _ _ x t :| [C.FunDef _ _ abstract _ _ _ _ (cl :| [])]) -> do
+    NiceMutual _ _ _ _ d@(C.FunSig _ access _ instanc macro info _ _ x t synL :| [C.FunDef _ _ abstract _ _ _ _ (cl :| [])]) -> do
       checkLetDefInfo wh access macro abstract
 
       -- Keep the concrete name and type for the auto record module
@@ -1796,13 +1793,13 @@ scopeCheckLetDef wh d = setCurrentRange d do
             InstanceDef _  -> makeInstance info
             NotInstanceDef -> info
 
-      msyn <- autoRecordLetSynonym cx ct
+      msyn <- whenSynonym synL $ autoRecordLetSynonym cx ct
       return $
         A.LetBind (LetRange $ getRange d) info' (A.mkBindName x2) t e :|
         maybeToList msyn
 
     -- Function signature without a body
-    C.Axiom _ acc abs instanc info x t -> do
+    C.Axiom _ acc abs instanc info x t _syn -> do
       checkLetDefInfo wh acc NotMacroDef abs
 
       t <- toAbstract t
@@ -1846,7 +1843,7 @@ scopeCheckLetDef wh d = setCurrentRange d do
             Nothing -> throwError err
             Just x  -> scopeCheckLetDef wh $ NiceMutual empty tc cc YesPositivityCheck
               (C.FunSig r PublicAccess ConcreteDef NotInstanceDef NotMacroDef
-                  info tc cc x (C.Underscore (getRange x) Nothing)
+                  info tc cc x (C.Underscore (getRange x) Nothing) PlainBinder
               :| [ C.FunDef r __IMPOSSIBLE__ ConcreteDef NotInstanceDef __IMPOSSIBLE__ __IMPOSSIBLE__ __IMPOSSIBLE__
                 $ singleton $ C.Clause x (ca <> catchall) ai lhs (C.RHS rhs) NoWhere []
               ])
@@ -2013,11 +2010,11 @@ instance ToAbstract NiceDeclaration where
     case d of
 
   -- Axiom (actual postulate)
-    C.Axiom r p a i rel x t -> do
+    C.Axiom r p a i rel x t syn -> do
       (y, decl) <- toAbstractNiceAxiom AxiomName d
       checkAllowedAxiom rel y
       -- check the postulate
-      mdecl <- autoRecordModuleSynonym p x t
+      mdecl <- whenSynonym syn $ autoRecordModuleSynonym p x t
       return $ decl : maybeToList mdecl
 
     C.NiceGeneralize r p i tac x t -> do
@@ -2033,7 +2030,7 @@ instance ToAbstract NiceDeclaration where
       return $ singleton $ A.Generalize s info i y t
 
   -- Fields
-    C.NiceField r p a i tac x (Arg ai t) -> do
+    C.NiceField r p a i tac x (Arg ai t) syn -> do
       unless (p == PublicAccess) $ typeError PrivateRecordField
       ai  <- checkFieldArgInfo False ai  -- we already warned in recordConstructorType
       tac <- traverse (toAbstractCtx TopCtx) tac
@@ -2059,7 +2056,7 @@ instance ToAbstract NiceDeclaration where
       let info = (mkDefInfoInstance x f p a i NotMacroDef r) { defTactic = tac }
       -- Module synonym for a record-headed field
       -- (--auto-record-modules), as public as the field itself.
-      msyn <- autoRecordFieldSynonym WarnNoSynonym ai x ct $ autoRecordModuleSynonym p x ct
+      msyn <- whenSynonym syn $ autoRecordFieldSynonym WarnNoSynonym ai x $ autoRecordModuleSynonym p x ct
       return $ A.Field info y (Arg ai t) : maybeToList msyn
 
   -- Primitive function
@@ -2082,10 +2079,10 @@ instance ToAbstract NiceDeclaration where
         return $ A.Mutual (MutualInfo tc cc pc (fuseRange kwr ds)) ds'
 
   -- Type signatures
-    C.FunSig r p a i m rel _ _ x t -> do
+    C.FunSig r p a i m rel _ _ x t syn -> do
         let kind = if m == MacroDef then MacroName else FunName
-        (_y, decl) <- toAbstractNiceAxiom kind (C.Axiom r p a i rel x t)
-        mdecl <- autoRecordModuleSynonym p x t
+        (_y, decl) <- toAbstractNiceAxiom kind (C.Axiom r p a i rel x t syn)
+        mdecl <- whenSynonym syn $ autoRecordModuleSynonym p x t
         return $ decl : maybeToList mdecl
 
   -- Function definitions
@@ -2439,9 +2436,8 @@ scopeCheckDataOrRecSig dataOrRec r er p a pc uc x ls t = do
       otherErr -> typeError otherErr
     -- Remember the concrete parameters of a data or record signature,
     -- so that the definition can recover the parameter types when
-    -- generating record module synonyms (--auto-record-modules).
-    whenM (optAutoRecordModules <$> pragmaOptions) $
-      setSigParams x' ls
+    -- generating module synonyms for @module@-marked parameters.
+    setSigParams x' ls
     return $ mkSig (mkDefInfo x f p a r) er x' ls' t'
   where
     namekind = case dataOrRec of
@@ -2507,7 +2503,7 @@ scopeCheckDataDef r o a pc uc x pars cons =
     checkConstructors cons = do
       -- Only type signatures (for constructors) are allowed in data definitions.
       (cs, cons') <- unzip . catMaybes <$> forM cons \case
-        d@(C.Axiom _ _ _ _ _ c _) -> pure $ Just (c, d)
+        d@(C.Axiom _ _ _ _ _ c _ _) -> pure $ Just (c, d)
         d -> Nothing <$ do
           setCurrentRange d $
             warning $ IllegalDeclarationInDataDefinition $ notSoNiceDeclarations d
@@ -2609,7 +2605,7 @@ scopeCheckRecDef r o a pc uc forceEta x directives pars fields =
              fs = concat $ forMaybe fields $ \case
                C.Field _ fs -> Just $ fs <&> \case
                  -- a Field block only contains field signatures
-                 C.FieldSig _ _ f _ -> f
+                 C.FieldSig _ _ f _ _ -> f
                  _ -> __IMPOSSIBLE__
                _ -> Nothing
          List1.unlessNull (duplicates fs) $ \ dups -> do
@@ -2801,7 +2797,7 @@ scopeCheckImport r x as open dir =
 
 -- | Checking postulate or type sig. without checking safe flag.
 toAbstractNiceAxiom :: KindOfName -> C.NiceDeclaration -> ScopeM (A.QName, A.Declaration)
-toAbstractNiceAxiom kind (C.Axiom r p a i info x t) = do
+toAbstractNiceAxiom kind (C.Axiom r p a i info x t _syn) = do
   -- Amy, 2025-05-04, issue 7856: type signatures (more
   -- importantly extended lambdas within them) should not belong
   -- to opaque blocks
@@ -2833,14 +2829,15 @@ toAbstractNiceAxiom _ _ = __IMPOSSIBLE__
 --   type aliases unfolding to record types and targets headed by infix
 --   operators (e.g. @X × Y@) are not recognized; in such cases (and any
 --   other we do not understand) we silently generate nothing.
--- | The named parameters of a concrete telescope, with their types.
---   Used to generate record module synonyms for module parameters.
+-- | The @module@-marked parameters of a concrete telescope, with their
+--   types.  Used to generate the requested module synonyms for binders.
 telParamsWithTypes :: C.Telescope -> [(C.Name, C.Expr)]
 telParamsWithTypes tel =
   [ (C.boundName $ C.binderName b, ty)
   | C.TBind _ xs ty <- tel
   , Arg _ (Named _ b) <- List1.toList xs
   , isNothing (C.binderPattern b)
+  , C.binderModuleSynonym b == SynonymBinder
   , not $ isNoName $ C.boundName $ C.binderName b
   ]
 
@@ -2851,7 +2848,8 @@ flattenSigParams :: C.Parameters -> [(Hiding, Maybe C.Expr)]
 flattenSigParams = concatMap \case
   C.DomainFree x -> [(getHiding x, Nothing)]
   C.DomainFull (C.TBind _ xs ty) -> List1.toList xs <&> \ x ->
-    (getHiding x, ty <$ guard (isNothing $ C.binderPattern $ namedArg x))
+    (getHiding x, ty <$ guard (isNothing (C.binderPattern $ namedArg x)
+                  && C.binderModuleSynonym (namedArg x) == SynonymBinder))
   C.DomainFull C.TLet{} -> []
 
 -- | Pair the parameters of a record definition with the types from its
@@ -2931,17 +2929,11 @@ targetParts = \case
       C.Ident q   -> Just q
       _           -> Nothing
 
-resolvesToRecord :: C.QName -> ScopeM Bool
-resolvesToRecord hd = resolveName hd <&> \case
-  DefinedName _ d _ -> anameKind d == RecName
-  _ -> False
-
--- | Does the type have a syntactically record-headed target (the
---   condition under which a module synonym is generated)?
-recordHeadedType :: C.Expr -> ScopeM Bool
-recordHeadedType t = fmap isJust $ runMaybeT $ do
-  (hd, _) <- targetParts $ snd $ peelDomains t
-  guardM $ lift $ resolvesToRecord hd
+-- | Run a module-synonym generator only when the binder\/signature was
+--   marked with the @module@ keyword (fork feature); otherwise nothing.
+whenSynonym :: BinderModuleSynonym -> ScopeM (Maybe a) -> ScopeM (Maybe a)
+whenSynonym SynonymBinder act = act
+whenSynonym PlainBinder   _   = return Nothing
 
 autoRecordModuleSynonym :: Access -> C.Name -> C.Expr -> ScopeM (Maybe A.Declaration)
 autoRecordModuleSynonym = autoRecordModuleSynonym' Apply TopOpenModule WarnNoSynonym
@@ -2969,20 +2961,17 @@ data WarnNoSynonym = WarnNoSynonym | QuietNoSynonym
 --   application uses the field (projection or constructor-type
 --   variable) in a relevant, non-erased position, so for irrelevant
 --   or erased fields it would not type-check.  Run the generator only
---   for usable fields; otherwise warn (if a synonym was plausibly
---   expected) and generate nothing.
+--   for usable fields; otherwise warn and generate nothing.  Only ever
+--   called for fields the user marked with @module@.
 autoRecordFieldSynonym
-  :: WarnNoSynonym -> ArgInfo -> C.Name -> C.Expr
-  -> ScopeM (Maybe a) -> ScopeM (Maybe a)
-autoRecordFieldSynonym warn ai x t generate
+  :: WarnNoSynonym -> ArgInfo -> C.Name -> ScopeM (Maybe a) -> ScopeM (Maybe a)
+autoRecordFieldSynonym warn ai x generate
   | isRelevant ai, not (hasQuantity0 ai) = generate
   | otherwise = do
       when (warn == WarnNoSynonym) $
-        whenM (optAutoRecordModules <$> pragmaOptions) $
-          whenM (recordHeadedType t) $
-            setCurrentRange x $ warning $ NoRecordModuleSynonym $ P.fsep $
-              P.pwords "No module synonym was generated for" ++ [P.pretty x <> ","] ++
-              P.pwords "because the field is irrelevant or erased"
+        setCurrentRange x $ warning $ NoRecordModuleSynonym $ P.fsep $
+          P.pwords "No module synonym was generated for" ++ [P.pretty x <> ","] ++
+          P.pwords "because the field is irrelevant or erased"
       return Nothing
 
 autoRecordModuleSynonym'
@@ -3002,18 +2991,15 @@ autoRecordModuleSynonym' apply kind warn p x t = runMaybeT $ do
 --   Nothing if the type is not cleanly record headed.
 synonymModApp :: WarnNoSynonym -> C.Name -> C.Expr -> MaybeT ScopeM C.ModuleApplication
 synonymModApp warn x t = do
-  guardM $ lift $ optAutoRecordModules <$> pragmaOptions
   let (dom, target) = peelDomains t
   (hd, _ps) <- targetParts target
-  -- A domain binder shadowing the head means the target is not a
-  -- record occurrence at all.
+  -- A domain binder shadowing the head means the target is not the
+  -- record occurrence the user meant; do not build a synonym for it.
   let userNames = concatMap (either (const []) tbindNames) dom
   case hd of
     C.QName h -> guard $ h `notElem` userNames
     C.Qual{}  -> pure ()
-  -- The head must resolve to a record type.
-  guardM $ lift $ resolvesToRecord hd
-  -- From here on the user plausibly expects a module synonym, so we
+  -- The binder was marked @module@, so the user expects a synonym; we
   -- warn instead of failing silently when we cannot generate one.
   let bail reason = do
         when (warn == WarnNoSynonym) $
@@ -3425,7 +3411,7 @@ instance ToAbstract DataConstrDecl where
 
   toAbstract (DataConstrDecl m a p synParams d) = traceCall (ScopeCheckDeclaration d) do
     case d of
-      C.Axiom r p1 a1 i ai x t -> do
+      C.Axiom r p1 a1 i ai x t _syn -> do
         -- unless (p1 == p) __IMPOSSIBLE__  -- This invariant is currently violated by test/Succeed/Issue282.agda
         unless (a1 == a) __IMPOSSIBLE__
         ai <- checkConstructorArgInfo ai
@@ -3768,9 +3754,7 @@ instance ToAbstract C.Clause where
     -- scope in the right hand side and in with/rewrite expressions.
     let eqnAnns = concat
           [ patternAscriptions p' | LeftLet pes <- eqs, (p', _) <- List1.toList pes ]
-    anns <- ifM (optAutoRecordModules <$> pragmaOptions)
-      (filterM (recordHeadedType . snd) $ patternAscriptions p ++ eqnAnns)
-      (return [])
+        anns = patternAscriptions p ++ eqnAnns
     vars1 <- getLocalVars
     eqs <- mapM (toAbstractCtx TopCtx) eqs
     vars2 <- getLocalVars
@@ -3797,7 +3781,8 @@ patternAscriptions = foldrCPattern step
   where
     step (C.AnnP _ b ty) acc
       | let x = C.boundName $ C.binderName b
-      , not (isNoName x) = (x, ty) : acc
+      , not (isNoName x)
+      , C.binderModuleSynonym b == SynonymBinder = (x, ty) : acc
     step _ acc = acc
 
 whereToAbstract

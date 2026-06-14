@@ -1077,7 +1077,7 @@ instance ToConcrete a => ToConcrete (A.Binder' a) where
   bindToConcrete (A.Binder p o a) ret =
     bindToConcrete a $ \ a ->
     bindToConcrete p $ \ p ->
-    ret $ C.Binder p o a
+    ret $ C.Binder p o PlainBinder a
 
 instance ToConcrete A.LamBinding where
     type ConOfAbs A.LamBinding = Maybe C.LamBinding
@@ -1113,7 +1113,7 @@ instance ToConcrete A.LetBinding where
         toConcrete (t, A.RHS e Nothing) >>= \case
           (t, (e, [], [], [])) ->
            ret $ addInstanceB (if isInstance info then Just empty else Nothing) $
-            [ C.TypeSig info empty (C.boundName x) t | keep t ] <>
+            [ C.TypeSig info empty (C.boundName x) t PlainBinder | keep t ] <>
             [ C.FunClause info
                 (C.LHS (C.IdentP True $ C.QName $ C.boundName x) [] [])
                 e C.NoWhere empty
@@ -1122,7 +1122,7 @@ instance ToConcrete A.LetBinding where
     bindToConcrete (A.LetAxiom i info x t) ret = bindToConcrete x \x -> do
       t <- toConcrete t
       ret $ addInstanceB (if isInstance info then Just empty else Nothing) $
-        [ C.TypeSig info empty (C.boundName x) t ]
+        [ C.TypeSig info empty (C.boundName x) t PlainBinder ]
     -- TODO: bind variables
     bindToConcrete (LetPatBind i ai p e) ret = do
         p <- toConcrete p
@@ -1232,7 +1232,7 @@ instance ToConcrete (Constr A.Constructor) where
   toConcrete (Constr (A.Axiom _ i info Nothing x t)) = do
     x' <- unsafeQNameToName <$> toConcrete x
     t' <- toConcreteTop t
-    return $ C.TypeSig info empty x' t'
+    return $ C.TypeSig info empty x' t' PlainBinder
   toConcrete (Constr (A.Axiom _ _ _ (Just _) _ _)) = __IMPOSSIBLE__
   toConcrete (Constr d) = headWithDefault __IMPOSSIBLE__ <$> toConcrete d
 
@@ -1285,7 +1285,7 @@ instance ToConcrete A.Declaration where
         (case mp of
            Nothing   -> []
            Just occs -> [C.Pragma (PolarityPragma noRange x' $ List1.toList occs)]) ++
-        [C.Postulate empty [C.TypeSig info empty x' t']]
+        [C.Postulate empty [C.TypeSig info empty x' t' PlainBinder]]
 
   toConcrete (A.Generalize s i j x t) = do
     x' <- unsafeQNameToName <$> toConcrete x
@@ -1293,7 +1293,7 @@ instance ToConcrete A.Declaration where
     withAbstractPrivate i $
       withInfixDecl i x'  $ do
       t' <- toConcreteTop t
-      return [C.Generalize empty [C.TypeSig j tac x' $ C.Generalized t']]
+      return [C.Generalize empty [C.TypeSig j tac x' (C.Generalized t') PlainBinder]]
 
   toConcrete (A.Field i x t) = do
     x' <- unsafeQNameToName <$> toConcrete x
@@ -1301,14 +1301,14 @@ instance ToConcrete A.Declaration where
     withAbstractPrivate i $
       withInfixDecl i x'  $ do
       t' <- toConcreteTop t
-      return [C.FieldSig (A.defInstance i) tac x' t']
+      return [C.FieldSig (A.defInstance i) tac x' t' PlainBinder]
 
   toConcrete (A.Primitive i x t) = do
     x' <- unsafeQNameToName <$> toConcrete x
     withAbstractPrivate i $
       withInfixDecl i x'  $ do
       t' <- traverse toConcreteTop t
-      return [C.Primitive empty [C.TypeSig (argInfo t') empty x' (unArg t')]]
+      return [C.Primitive empty [C.TypeSig (argInfo t') empty x' (unArg t') PlainBinder]]
         -- Primitives are always relevant.
 
   toConcrete (A.FunDef i _ cs) =

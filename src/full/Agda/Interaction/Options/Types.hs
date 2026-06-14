@@ -167,10 +167,6 @@ data PragmaOptions = PragmaOptions
   , _optPostfixProjections        :: WithDefault 'True
       -- ^ Should system generated projections 'ProjSystem' be printed
       --   postfix (True) or prefix (False).
-  , _optAutoRecordModules         :: WithDefault 'False
-      -- ^ Automatically define, for each definition @A : Δ → R ps@ whose
-      --   type ends in a record type @R@, a module synonym
-      --   @module A Δ = R ps (A Δ)@.
   , _optKeepPatternVariables      :: WithDefault 'True
       -- ^ Should case splitting replace variables with dot patterns
       --   (False) or keep them as variables (True).

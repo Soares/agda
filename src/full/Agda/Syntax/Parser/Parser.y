@@ -597,7 +597,7 @@ BIdsWithHiding : Application {%
     Nothing   -> parseError "Expected sequence of possibly hidden bound identifiers"
     Just good -> forM (sconcat good) $ updateNamedArgA $ \ (n, me) -> do
                    p <- traverse exprToPattern me
-                   pure $ Binder p UserBinderName (mkBoundName_ n)
+                   pure $ Binder p UserBinderName PlainBinder (mkBoundName_ n)
     }
 
 
@@ -815,6 +815,7 @@ RecordUpdate
 -- into a Pi telescope by 'mkFunOrPi') or as LHS binder patterns.
 Expr4 :: { Expr }
 Expr4 : Expr1 '=' Expr       { Equal (getRange ($1, $2, $3)) $1 $3 }
+      | 'module' Application ':' Expr {% mkModuleAscriptionExpr (getRange ($1, $2, $3, $4)) $2 $4 }
       | Expr                 { $1 }
 
 ExprOrAttr :: { Expr }
@@ -895,6 +896,11 @@ TypedBinding
     | '{' TBind '}'           { setRange (getRange ($1,$2,$3)) $ hide $2 }
     | "{{" TBind "}}"         { setRange (getRange ($1,$2,$3)) $ makeInstance $2 }
 
+-- @(module x : T)@ telescope binders: generate a module synonym. (Fork feature.)
+    | '(' TBindMod ')'        { setRange (getRange ($1,$2,$3)) $ $2 }
+    | '{' TBindMod '}'        { setRange (getRange ($1,$2,$3)) $ hide $2 }
+    | "{{" TBindMod "}}"      { setRange (getRange ($1,$2,$3)) $ makeInstance $2 }
+
 -- irrelevant
     | '.' '(' TBindWithHiding ')' { setRange (getRange ($2,$3,$4)) $ makeIrrelevant $1 $3 }
     | '.' '{' TBind '}'           { setRange (getRange ($2,$3,$4)) $ hide $ makeIrrelevant $1 $3 }
@@ -926,6 +932,14 @@ TBind :: { TypedBinding }
 TBind : CommaBIds ':' Expr  {
     let r = getRange ($1,$2,$3) -- the range is approximate only for TypedBindings
     in TBind r $1 $3
+  }
+
+-- @module x1 .. xn : A@ : a typed binding whose binders request module
+-- synonyms @module xi = A xi@.  (Fork feature.)
+TBindMod :: { TypedBinding }
+TBindMod : 'module' CommaBIds ':' Expr  {
+    let r = getRange ($1,$2,$3,$4)
+    in markSynonymTBind (TBind r $2 $4)
   }
 
 ModalTBind :: { TypedBinding }
@@ -1328,6 +1342,7 @@ Declaration
     | Open            { singleton $1 }
     | ModuleMacro     { singleton $1 }
     | Module          { singleton $1 }
+    | ModuleSynonymSig { $1 }
     | Pragma          { singleton $1 }
     | Syntax          { singleton $1 }
     | PatternSyn      { singleton $1 }
@@ -1357,14 +1372,29 @@ ArgTypeSigs
       in T.traverse (setOverlap . fmap (\ x -> typeSig defaultArgInfo tac x $4)) xs }
   | 'instance' ArgTypeSignatures {
     let
-      setInstance (TypeSig info tac x t) = TypeSig (makeInstance info) tac x t
+      setInstance (TypeSig info tac x t syn) = TypeSig (makeInstance info) tac x t syn
       setInstance _ = __IMPOSSIBLE__ in
     fmap (fmap setInstance) $2 }
+-- @module f : T@ field: request a module synonym for the field. (Fork feature.)
+  | 'module' ModalArgIds ':' Expr { let (tac, xs) = $2 in
+                           fmap (fmap (\ x -> typeSig' SynonymBinder defaultArgInfo tac x $4)) xs }
 
 ModalArgTypeSigs :: { List1 Declaration }
 ModalArgTypeSigs
   : ModalArgIds ':' Expr { let (tac, xs) = $1 in
                            fmap (\ (Arg ai x) -> typeSig ai tac x $3) xs }
+
+-- @module f : T@ at the declaration level: an ordinary type signature that also
+-- requests a module synonym @module f = T f@.  (Fork feature.)  Shares the
+-- @module Attributes ModuleName@ prefix with 'Module'/'ModuleMacro'; the @:@
+-- distinguishes it from @where@/@=@.
+ModuleSynonymSig :: { List1 Declaration }
+ModuleSynonymSig
+  : 'module' Attributes ModuleName ':' Expr {% do
+      erased <- onlyErased $2
+      name   <- ensureUnqual $3
+      let ai = setQuantity (asQuantity erased) defaultArgInfo
+      return $ singleton $ typeSig' SynonymBinder ai empty name $5 }
 
 -- Function declarations. The left hand side is parsed as an expression to allow
 -- declarations like 'x::xs ++ ys = e', when '::' has higher precedence than '++'.
@@ -1473,7 +1503,7 @@ Fields : 'field' ArgTypeSignaturesOrEmpty
                 inst i = case getHiding i of
                            Instance _ -> InstanceDef empty  -- no @instance@ keyword here
                            _          -> NotInstanceDef
-                toField (Arg info (TypeSig info' tac x t)) = FieldSig (inst info') tac x (Arg info t)
+                toField (Arg info (TypeSig info' tac x t syn)) = FieldSig (inst info') tac x (Arg info t) syn
               in Field (kwRange $1) $ map toField $2 }
 
 -- Variable declarations for automatic generalization

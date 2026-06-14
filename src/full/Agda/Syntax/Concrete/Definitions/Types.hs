@@ -46,12 +46,14 @@ import Agda.Utils.List1 (List1)
       content (Expr, Declaration ...)
 -}
 data NiceDeclaration
-  = Axiom Range Access IsAbstract IsInstance ArgInfo Name Expr
+  = Axiom Range Access IsAbstract IsInstance ArgInfo Name Expr BinderModuleSynonym
       -- ^ 'IsAbstract' argument: We record whether a declaration was made in an @abstract@ block.
       --
       --   'ArgInfo' argument: Axioms and functions can be declared irrelevant.
       --   ('Hiding' should be 'NotHidden'.)
-  | NiceField Range Access IsAbstract IsInstance TacticAttribute Name (Arg Expr)
+      --
+      --   'BinderModuleSynonym': @module f : T@ request (fork feature).
+  | NiceField Range Access IsAbstract IsInstance TacticAttribute Name (Arg Expr) BinderModuleSynonym
   | PrimitiveFunction Range Access IsAbstract Name (Arg Expr)
   | NiceMutual KwRange TerminationCheck CoverageCheck PositivityCheck (List1 NiceDeclaration)
   | NiceModule Range Access IsAbstract Erased QName Telescope
@@ -69,7 +71,7 @@ data NiceDeclaration
     -- ^ An uncategorized function clause, could be a function clause
     --   without type signature or a pattern lhs (e.g. for irrefutable let).
     --   The 'Declaration' is the actual 'FunClause'.
-  | FunSig Range Access IsAbstract IsInstance IsMacro ArgInfo TerminationCheck CoverageCheck Name Expr
+  | FunSig Range Access IsAbstract IsInstance IsMacro ArgInfo TerminationCheck CoverageCheck Name Expr BinderModuleSynonym
   | FunDef Range (List1 Declaration) IsAbstract IsInstance TerminationCheck CoverageCheck Name (List1 Clause)
       -- ^ Block of function clauses (we have seen the type signature before).
       --   The 'Declaration's are the original declarations that were processed
@@ -203,8 +205,8 @@ data KindOfBlock
 instance NFData KindOfBlock
 
 instance HasRange NiceDeclaration where
-  getRange (Axiom r _ _ _ _ _ _)           = r
-  getRange (NiceField r _ _ _ _ _ _)       = r
+  getRange (Axiom r _ _ _ _ _ _ _)         = r
+  getRange (NiceField r _ _ _ _ _ _ _)     = r
   getRange (NiceMutual kwr _ _ _ ds)       = fuseRange kwr ds
   getRange (NiceModule r _ _ _ _ _ _ )     = r
   getRange (NiceModuleMacro r _ _ _ _ _ _) = r
@@ -212,7 +214,7 @@ instance HasRange NiceDeclaration where
   getRange (NiceImport o r x as dir)       = getRange (o, r, x, as, dir)
   getRange (NicePragma r _)                = r
   getRange (PrimitiveFunction r _ _ _ _)   = r
-  getRange (FunSig r _ _ _ _ _ _ _ _ _)    = r
+  getRange (FunSig r _ _ _ _ _ _ _ _ _ _)  = r
   getRange (FunDef r _ _ _ _ _ _ _)        = r
   getRange (NiceDataDef r _ _ _ _ _ _ _)   = r
   getRange (NiceLoneConstructor kwr ds)    = fuseRange kwr ds
@@ -229,8 +231,8 @@ instance HasRange NiceDeclaration where
 
 instance Pretty NiceDeclaration where
   pretty = \case
-    Axiom _ _ _ _ _ x _            -> text "postulate" <+> pretty x <+> colon <+> text "_"
-    NiceField _ _ _ _ _ x _        -> text "field" <+> pretty x
+    Axiom _ _ _ _ _ x _ _          -> text "postulate" <+> pretty x <+> colon <+> text "_"
+    NiceField _ _ _ _ _ x _ _      -> text "field" <+> pretty x
     PrimitiveFunction _ _ _ x _    -> text "primitive" <+> pretty x
     NiceMutual{}                   -> text "mutual"
     NiceOpaque _ _ ds              -> text "opaque" <+> nest 2 (vcat (map pretty ds))
@@ -242,7 +244,7 @@ instance Pretty NiceDeclaration where
     NiceRecSig _ _ _ _ _ _ _ x _ _ -> text "record" <+> pretty x
     NiceDataSig _ _ _ _ _ _ x _ _  -> text "data" <+> pretty x
     NiceFunClause{}                -> text "<function clause>"
-    FunSig _ _ _ _ _ _ _ _ x _     -> pretty x <+> colon <+> text "_"
+    FunSig _ _ _ _ _ _ _ _ x _ _   -> pretty x <+> colon <+> text "_"
     FunDef _ _ _ _ _ _ x _         -> pretty x <+> text "= _"
     NiceDataDef _ _ _ _ _ x _ _    -> text "data" <+> pretty x <+> text "where"
     NiceLoneConstructor _ _        -> text "data _ where"

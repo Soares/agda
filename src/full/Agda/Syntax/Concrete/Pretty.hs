@@ -239,17 +239,17 @@ isLabeled x
   | otherwise              = Nothing
 
 instance Pretty a => Pretty (Binder' a) where
-  pretty (Binder mpat UserBinderName n) =
+  pretty (Binder mpat UserBinderName _ n) =
     applyWhenJust mpat (\ pat -> (<+> ("@" <+> parens (pretty pat)))) $ pretty n
 
-  pretty (Binder pat InsertedBinderName n) = case pat of
+  pretty (Binder pat InsertedBinderName _ n) = case pat of
     Just pat -> parens (pretty pat)
     Nothing  -> pretty n
 
 instance Pretty NamedBinding where
   pretty (NamedBinding withH
            x@(Arg (ArgInfo h (Modality r q c p) _o _fv (Annotation lock rew))
-               (Named _mn xb@(Binder _mp _ (BName _y _fix t _fin))))) =
+               (Named _mn xb@(Binder _mp _ _ (BName _y _fix t _fin))))) =
     applyWhen withH prH $
     applyWhenJust (isLabeled x) (\ l -> (text l <+>) . (equals <+>)) (pretty xb)
       -- isLabeled looks at _mn and _y
@@ -384,16 +384,17 @@ instance Pretty DoStmt where
 instance Pretty Declaration where
   prettyList = vcat . map pretty
   pretty = \case
-    TypeSig i tac x e ->
+    TypeSig i tac x e syn ->
+      applyWhen (syn == SynonymBinder) (hlKeyword "module" <+>) $
       sep [ prettyTactic' tac $ prettyRelevance i $ prettyCohesion i $
               prettyQuantity i $ prettyPolarity i $ pretty x <+> colon
           , nest 2 $ pretty e
           ]
-    FieldSig inst tac x (Arg i e) ->
+    FieldSig inst tac x (Arg i e) syn ->
       mkInst inst $ mkOverlap i $
       -- We print relevance before hiding, need to clear it before printing the rest of the attributes with TypeSig.
       prettyRelevance i $ prettyHiding i id $
-      pretty $ TypeSig (setRelevance relevant i) tac x e
+      pretty $ TypeSig (setRelevance relevant i) tac x e syn
       where
         mkInst (InstanceDef _) d = sep [ hlKeyword "instance", nest 2 d ]
         mkInst NotInstanceDef  d = d

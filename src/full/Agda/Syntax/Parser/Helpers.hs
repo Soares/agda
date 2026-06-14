@@ -202,7 +202,7 @@ mkQName ss | Just (ss0, ss1) <- initLast ss = do
 mkQName _ = __IMPOSSIBLE__ -- The lexer never gives us an empty list of parts
 
 mkDomainFree_ :: (NamedArg Binder -> NamedArg Binder) -> Maybe Pattern -> Name -> NamedArg Binder
-mkDomainFree_ f p n = f $ defaultNamedArg $ Binder p UserBinderName $ mkBoundName_ n
+mkDomainFree_ f p n = f $ defaultNamedArg $ Binder p UserBinderName PlainBinder $ mkBoundName_ n
 
 mkRString :: (Interval, String) -> RString
 mkRString (i, s) = Ranged (getRange i) s
@@ -396,7 +396,7 @@ boundNamesOrAbsurd es
         Nothing   -> parseError $ "expected sequence of bound identifiers"
         Just good -> fmap Left $ forM good $ \ (n, me) -> do
                        p <- traverse exprToPattern me
-                       return (defaultNamedArg (Binder p UserBinderName (mkBoundName_ n)))
+                       return (defaultNamedArg (Binder p UserBinderName PlainBinder (mkBoundName_ n)))
 
   where
 
@@ -546,14 +546,30 @@ exprToPattern e = case C.isPattern e of
 --   hidden or instance binder pattern on a left hand side,
 --   e.g. @f {x : T} = ...@.
 mkAscriptionExpr :: Range -> List1 Expr -> Expr -> Parser Expr
-mkAscriptionExpr r es t = do
+mkAscriptionExpr = mkAscriptionExpr' PlainBinder
+
+-- | @(module x : T)@: like 'mkAscriptionExpr' but marks each binder so that a
+--   module synonym @module x = T x@ is generated for it. (Fork feature.)
+mkModuleAscriptionExpr :: Range -> List1 Expr -> Expr -> Parser Expr
+mkModuleAscriptionExpr = mkAscriptionExpr' SynonymBinder
+
+mkAscriptionExpr' :: BinderModuleSynonym -> Range -> List1 Expr -> Expr -> Parser Expr
+mkAscriptionExpr' syn r es t = do
   anns <- forM es \ e -> case exprAsNameAndPattern e of
     Nothing -> parseErrorRange e $
       "Not a valid type-ascribed binder: " ++ prettyShow e
     Just (n, me) -> do
       p <- traverse exprToPattern me
-      pure $ Ann r (Binder p UserBinderName (mkBoundName_ n)) t
+      pure $ Ann r (Binder p UserBinderName syn (mkBoundName_ n)) t
   pure $ rawApp anns
+
+-- | Mark every binder of a typed binding @(x y : T)@ as requesting a module
+--   synonym, for the @(module x y : T)@ telescope syntax. (Fork feature.)
+markSynonymTBind :: TypedBinding -> TypedBinding
+markSynonymTBind = \case
+  TBind r xs t -> TBind r (fmap (fmap (fmap setSyn)) xs) t
+  tb@TLet{}    -> tb
+  where setSyn b = b { binderModuleSynonym = SynonymBinder }
 
 -- | Build a function space from the domain before @'->'@.  Ascribed
 --   binders @{x y : T}@ / @{{x : T}}@ / @(x y : T)@ parse as 'Ann's
@@ -642,18 +658,18 @@ patternSynArgs = mapM \ x -> do
   case x of
 
     -- Invariant: fixity is not used here, and neither finiteness
-    Arg _ (Named _ (Binder _ _ (BName _ fix _ fin)))
+    Arg _ (Named _ (Binder _ _ _ (BName _ fix _ fin)))
       | not $ null fix -> __IMPOSSIBLE__
       | fin            -> __IMPOSSIBLE__
 
     -- Error cases:
-    Arg _ (Named _ (Binder (Just _) _ _)) ->
+    Arg _ (Named _ (Binder (Just _) _ _ _)) ->
       abort "Arguments to pattern synonyms cannot be patterns themselves"
-    Arg _ (Named _ (Binder _ _ (BName _ _ tac _))) | not (null tac) ->
+    Arg _ (Named _ (Binder _ _ _ (BName _ _ tac _))) | not (null tac) ->
       abort $ noAnn "Tactic"
 
     -- Benign case:
-    Arg ai (Named mn (Binder Nothing _ (BName n _ _ _)))
+    Arg ai (Named mn (Binder Nothing _ _ (BName n _ _ _)))
       -- allow {n = n} for backwards compat with Agda 2.6
       | maybe True ((C.nameToRawName n ==) . rangedThing . woThing) mn ->
         case ai of
@@ -758,7 +774,11 @@ funClauseOrTypeSigs attrs lhs' with mrhs wh = do
       _ -> parseError "A type signature cannot have a where clause"
 
 typeSig :: ArgInfo -> TacticAttribute -> Name -> Expr -> Declaration
-typeSig i tac n e = TypeSig i tac n (Generalized e)
+typeSig = typeSig' PlainBinder
+
+-- | A type signature, optionally marked @module f : T@ to request a synonym.
+typeSig' :: BinderModuleSynonym -> ArgInfo -> TacticAttribute -> Name -> Expr -> Declaration
+typeSig' syn i tac n e = TypeSig i tac n (Generalized e) syn
 
 ------------------------------------------------------------------------
 -- * Relevance

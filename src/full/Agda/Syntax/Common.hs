@@ -2566,6 +2566,18 @@ instance KillRange BinderNameOrigin where
 
 instance NFData BinderNameOrigin
 
+-- | Did the user write the @module@ keyword on a binder, e.g. @(module x : T)@,
+--   requesting an auto-generated module synonym @module x = R x@?  (Fork feature.)
+data BinderModuleSynonym
+  = SynonymBinder   -- ^ @(module x : T)@: generate a module synonym for @x@.
+  | PlainBinder     -- ^ Ordinary binder, no synonym.
+  deriving (Show, Eq, Generic)
+
+instance KillRange BinderModuleSynonym where
+  killRange = id
+
+instance NFData BinderModuleSynonym
+
 -----------------------------------------------------------------------------
 -- * Free variable annotations
 -----------------------------------------------------------------------------

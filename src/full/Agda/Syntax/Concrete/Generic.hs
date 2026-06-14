@@ -234,8 +234,8 @@ instance ExprLike ModuleApplication where
 
 instance ExprLike Declaration where
   mapExpr f = \case
-     TypeSig ai t x e          -> TypeSig ai (mapE t) x (mapE e)
-     FieldSig i t n e          -> FieldSig i (mapE t) n (mapE e)
+     TypeSig ai t x e s        -> TypeSig ai (mapE t) x (mapE e) s
+     FieldSig i t n e s        -> FieldSig i (mapE t) n (mapE e) s
      Field r fs                -> Field r                              $ map (mapExpr f) fs
      FunClause ai lhs rhs wh ca-> FunClause ai (mapE lhs) (mapE rhs) (mapE wh) ca
      DataSig r er x bs e       -> DataSig r er x (mapE bs)             $ mapE e
@@ -322,8 +322,8 @@ instance FoldDecl Declaration where
     Macro _             ds  -> foldDecl f ds
     Record _ _ _ _ _ _  ds  -> foldDecl f ds
     RecordDef _ _ _ _   ds  -> foldDecl f ds
-    TypeSig _ _ _ _         -> mempty
-    FieldSig _ _ _ _        -> mempty
+    TypeSig _ _ _ _ _       -> mempty
+    FieldSig _ _ _ _ _      -> mempty
     Generalize _ _          -> mempty
     Field _ _               -> mempty
     FunClause _ _ _ wh _    -> foldDecl f wh
@@ -377,8 +377,8 @@ instance TraverseDecl Declaration where
       Opaque r ds                -> Opaque r                <$> preTraverseDecl f ds
       Record r er n dir tel t ds -> Record r er n dir tel t <$> preTraverseDecl f ds
       RecordDef r n dir tel   ds -> RecordDef r n dir tel   <$> preTraverseDecl f ds
-      TypeSig _ _ _ _            -> return d
-      FieldSig _ _ _ _           -> return d
+      TypeSig _ _ _ _ _          -> return d
+      FieldSig _ _ _ _ _         -> return d
       Generalize _ _             -> return d
       Field _ _                  -> return d
       FunClause ai lhs rhs wh ca -> preTraverseDecl f wh <&> \ wh' -> FunClause ai lhs rhs wh' ca

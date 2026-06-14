@@ -276,6 +276,8 @@ data DoStmt
 data Binder' a = Binder
   { binderPattern    :: Maybe Pattern
   , binderNameOrigin :: BinderNameOrigin
+  , binderModuleSynonym :: BinderModuleSynonym
+      -- ^ Did the user write @(module x : T)@? (Fork feature.)
   , binderName       :: a
   } deriving (Eq, Functor, Foldable, Traversable)
 
@@ -285,7 +287,7 @@ mkBinder_ :: Name -> Binder
 mkBinder_ = mkBinder . mkBoundName_
 
 mkBinder :: a -> Binder' a
-mkBinder = Binder Nothing UserBinderName
+mkBinder = Binder Nothing UserBinderName PlainBinder
 
 -- | Parameters supplied to data and record definitions (as opposed to their signatures)
 --   are stripped of their type information.
@@ -547,10 +549,11 @@ ungatherRecordDirectives (RecordDirectives ind eta pat con) = catMaybes
 -}
 
 data Declaration
-  = TypeSig ArgInfo TacticAttribute Name Expr
+  = TypeSig ArgInfo TacticAttribute Name Expr BinderModuleSynonym
       -- ^ Axioms and functions can be irrelevant. ('Hiding' should be 'NotHidden')
       --   'TacticAttribute' makes only sense in 'Generalize' blocks.
-  | FieldSig IsInstance TacticAttribute Name (Arg Expr)
+      --   'BinderModuleSynonym' records a @module f : T@ request (fork feature).
+  | FieldSig IsInstance TacticAttribute Name (Arg Expr) BinderModuleSynonym
   | Generalize KwRange [TypeSignature] -- ^ Variables to be generalized, can be hidden and/or irrelevant.
   | Field KwRange [FieldSignature]
   | FunClause ArgInfo LHS RHS WhereClause Catchall -- ^ Only 'Modality' is used in 'ArgInfo'.
@@ -623,8 +626,8 @@ isPragma = \case
     Macro _ _               -> empty
     Record _ _ _ _ _ _ _    -> empty
     RecordDef _ _ _ _ _     -> empty
-    TypeSig _ _ _ _         -> empty
-    FieldSig _ _ _ _        -> empty
+    TypeSig _ _ _ _ _       -> empty
+    FieldSig _ _ _ _ _      -> empty
     Generalize _ _          -> empty
     Field _ _               -> empty
     FunClause _ _ _ _ _     -> empty
@@ -919,8 +922,8 @@ isBinderP = \case
   IdentP _ qn
              -> mkBinder_ <$> isUnqualified qn
   WildP r    -> pure $ mkBinder_ $ setRange r simpleHole
-  AsP r n p  -> pure $ Binder (Just p) UserBinderName $ mkBoundName_ n
-  ParenP r p -> pure $ Binder (Just p) UserBinderName $ mkBoundName_ $ setRange r simpleHole
+  AsP r n p  -> pure $ Binder (Just p) UserBinderName PlainBinder $ mkBoundName_ n
+  ParenP r p -> pure $ Binder (Just p) UserBinderName PlainBinder $ mkBoundName_ $ setRange r simpleHole
   _ -> Nothing
 
 {--------------------------------------------------------------------------
@@ -1029,7 +1032,7 @@ instance HasRange Expr where
 --     getRange (TeleFun x y) = fuseRange x y
 
 instance HasRange Binder where
-  getRange (Binder a _ b) = fuseRange a b
+  getRange (Binder a _ _ b) = fuseRange a b
 
 instance HasRange (TacticAttribute' a) where
   getRange = maybe noRange getRange . theTacticAttribute
@@ -1067,8 +1070,8 @@ instance HasRange RecordDirective where
   getRange (PatternOrCopattern r) = r
 
 instance HasRange Declaration where
-  getRange (TypeSig _ _ x t)       = fuseRange x t
-  getRange (FieldSig _ _ x t)      = fuseRange x t
+  getRange (TypeSig _ _ x t _)     = fuseRange x t
+  getRange (FieldSig _ _ x t _)    = fuseRange x t
   getRange (Field kwr ds)          = fuseRange kwr ds
   getRange (FunClause ai lhs rhs wh _) = ai `fuseRange` lhs `fuseRange` rhs `fuseRange` wh
   getRange (DataSig r _ _ _ _)     = r
@@ -1216,7 +1219,7 @@ instance KillRange AsName where
   killRange (AsName n _) = killRangeN (flip AsName noRange) n
 
 instance KillRange Binder where
-  killRange (Binder a o b) = killRangeN Binder a o b
+  killRange (Binder a o s b) = killRangeN Binder a o s b
 
 instance KillRange BoundName where
   killRange (BName n f t b) = killRangeN BName n f t b
@@ -1228,8 +1231,8 @@ instance KillRange RecordDirective where
   killRange (PatternOrCopattern _) = PatternOrCopattern noRange
 
 instance KillRange Declaration where
-  killRange (TypeSig ai t n e)      = killRangeN TypeSig ai t n e
-  killRange (FieldSig i t n e)      = killRangeN FieldSig i t n e
+  killRange (TypeSig ai t n e s)    = killRangeN TypeSig ai t n e s
+  killRange (FieldSig i t n e s)    = killRangeN FieldSig i t n e s
   killRange (Generalize r ds )      = killRangeN (Generalize empty) ds
   killRange (Field r fs)            = killRangeN (Field empty) fs
   killRange (FunClause ai l r w ca) = killRangeN FunClause ai l r w ca
@@ -1466,8 +1469,8 @@ instance NFData RecordDirective where
   rnf (PatternOrCopattern _) = ()
 
 instance NFData Declaration where
-  rnf (TypeSig a b c d)       = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
-  rnf (FieldSig a b c d)      = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
+  rnf (TypeSig a b c d e)     = rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e
+  rnf (FieldSig a b c d e)    = rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e
   rnf (Generalize _ a)        = rnf a
   rnf (Field _ fs)            = rnf fs
   rnf (FunClause a b c d e)   = rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e
@@ -1580,7 +1583,7 @@ instance NFData a => NFData (LamBinding' a) where
   rnf (DomainFull a) = rnf a
 
 instance NFData Binder where
-  rnf (Binder a o b) = rnf (a, o, b)
+  rnf (Binder a o s b) = rnf (a, o, s, b)
 
 instance NFData BoundName where
   rnf (BName a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
