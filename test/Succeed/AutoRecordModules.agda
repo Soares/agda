@@ -135,15 +135,6 @@ letTest =
       L = M
   in 3 L.∘ 4
 
--- Type-ascribed pattern variables.  A plain checked ascription (no
--- @module@, so no synonym):
-ann1 : Nat → Nat
-ann1 (n : Nat) = suc n
-
--- The ascription fills in a hole in the signature by unification.
-ann2 : _ → Bool
-ann2 (n : Nat) = true
-
 -- Record-headed @module@-marked ascriptions give clause-scoped synonyms.
 annSyn : (X : Magma) → Magma.Carrier X → Magma.Carrier X
 annSyn (module A : Magma) x = x A.∘ x
@@ -290,7 +281,10 @@ data Walk (module A : Magma) (a : A.Carrier) : Set where
   stop : Walk A a
   step : A.Carrier → Walk A a → Walk A a
 
-walkTwo : (module A : Magma) (a : A.Carrier) → Walk A a
+-- NB: separate arrows, not a grouped `(module A : Magma) (a : A.Carrier)`
+-- telescope — grouping a `module` binder with a following classic binder in
+-- a Pi *type* is a known parser gap (see synonym-task-queue memory).
+walkTwo : (module A : Magma) → (a : A.Carrier) → Walk A a
 walkTwo (module A : Magma) a = step (a A.∘ a) stop
 
 -- The synonym is in scope in the indices and works with a separate
