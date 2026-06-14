@@ -1644,8 +1644,12 @@ niceDefParameters dataOrRec = concatMapM \case
       "(note: parameters may not repeat information from signature)"
 
     strip :: NamedArg Binder -> Nice (WithHiding (Named_ Name))
-    strip (Arg (ArgInfo h m _o _fv ann) (Named mn (Binder mp _bo _ (BName x fx tac _)))) =
+    strip (Arg (ArgInfo h m _o _fv ann) (Named mn (Binder mp _bo syn (BName x fx tac _)))) =
       WithHiding h (Named mn x) <$ do
+        when (syn == SynonymBinder) $ declarationWarning $
+          InvalidDataOrRecDefParameter (getRange x) dataOrRec
+            "`module` synonym marker"
+            "(annotate the signature parameter instead)"
         unless (null m)   $ warn m   "parameter modality"
         unless (null ann) $ warn ann "parameter annotation"
         unless (null mp)  $ warn mp  "pattern attached to parameter"
