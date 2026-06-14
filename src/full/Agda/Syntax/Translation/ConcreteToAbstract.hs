@@ -2481,7 +2481,7 @@ scopeCheckDataDef r o a pc uc x pars cons =
     -- unless the flag is on.
     synParams <- getSigParams x' <&> \case
       Nothing  -> []
-      Just sig -> alignDefParams (flattenSigParams sig) pars
+      Just sig -> keepLastByName $ alignDefParams (flattenSigParams sig) pars
 
     withLocalVars do
       -- Scope check parameters
@@ -2570,7 +2570,7 @@ scopeCheckRecDef r o a pc uc forceEta x directives pars fields =
     -- is on.
     synParams <- getSigParams x' <&> \case
       Nothing  -> []
-      Just sig -> alignDefParams (flattenSigParams sig) pars
+      Just sig -> keepLastByName $ alignDefParams (flattenSigParams sig) pars
 
     -- Preserve the local variable set since we add some generalizable ones.
     withLocalVars $ do
@@ -2829,10 +2829,21 @@ toAbstractNiceAxiom _ _ = __IMPOSSIBLE__
 --   type aliases unfolding to record types and targets headed by infix
 --   operators (e.g. @X × Y@) are not recognized; in such cases (and any
 --   other we do not understand) we silently generate nothing.
+-- | Keep only the LAST binder of each name, matching how variable
+--   shadowing resolves: @(module A : S) (module A : T)@ yields a single
+--   @module A = T A@ rather than a clashing pair.  ('C.Name' equality
+--   compares name parts, ignoring ranges, so the two @A@s are equal.)
+keepLastByName :: [(C.Name, C.Expr)] -> [(C.Name, C.Expr)]
+keepLastByName [] = []
+keepLastByName (p@(n, _) : rest)
+  | any ((n ==) . fst) rest = keepLastByName rest
+  | otherwise               = p : keepLastByName rest
+
 -- | The @module@-marked parameters of a concrete telescope, with their
 --   types.  Used to generate the requested module synonyms for binders.
+--   Shadowed names are deduplicated (last wins, see 'keepLastByName').
 telParamsWithTypes :: C.Telescope -> [(C.Name, C.Expr)]
-telParamsWithTypes tel =
+telParamsWithTypes tel = keepLastByName
   [ (C.boundName $ C.binderName b, ty)
   | C.TBind _ xs ty <- tel
   , Arg _ (Named _ b) <- List1.toList xs
@@ -3754,7 +3765,7 @@ instance ToAbstract C.Clause where
     -- scope in the right hand side and in with/rewrite expressions.
     let eqnAnns = concat
           [ patternAscriptions p' | LeftLet pes <- eqs, (p', _) <- List1.toList pes ]
-        anns = patternAscriptions p ++ eqnAnns
+        anns = keepLastByName $ patternAscriptions p ++ eqnAnns
     vars1 <- getLocalVars
     eqs <- mapM (toAbstractCtx TopCtx) eqs
     vars2 <- getLocalVars

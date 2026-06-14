@@ -303,3 +303,11 @@ data SepWalk B where
 -- (dogfooding blocker: f {S1 : Spec} ... in WildBracket).
 hidSyn : ∀ {A : Magma} → Magma.Carrier A → Magma.Carrier A
 hidSyn {module A : Magma} x = x A.∘ x
+
+-- Shadowed @module@-marked binders: the synonym follows variable
+-- shadowing (last wins), rather than generating a clashing pair of
+-- modules.  Here the second @A@ (a 'Pointed') shadows the first
+-- (a 'Magma'), so @A.point@ — a 'Pointed' field — resolves.
+module Shadow (module A : Magma) (module A : Pointed Nat) where
+  useLast : Nat
+  useLast = A.point
