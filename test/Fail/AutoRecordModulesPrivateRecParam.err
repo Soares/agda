@@ -1,6 +1,6 @@
-AutoRecordModulesPrivateRecParam.agda:17.14-27: error: [NotInScope]
+AutoRecordModulesPrivateRecParam.agda:16.14-27: error: [NotInScope]
 Not in scope:
   Hom.A.Carrier
-  at AutoRecordModulesPrivateRecParam.agda:17.14-27
+  at AutoRecordModulesPrivateRecParam.agda:16.14-27
     (did you mean 'Magma.Carrier'?)
 when scope checking Hom.A.Carrier

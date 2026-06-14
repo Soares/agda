@@ -85,10 +85,7 @@ import Agda.Utils.Impossible
 %monad { Parser }
 %lexer { lexer } { TokEOF{} }
 
-%expect 8
--- * 1 shift/reduce for "(module Application . ':'": the `module`-marked
---   binder atom vs the surrounding LHS reduce; shifting parses
---   (module x : T) as a synonym-requesting ascription.
+%expect 7
 -- * shift/reduce for \ x y z -> foo = bar
 --   shifting means it'll parse as \ x y z -> (foo = bar) rather than
 --   (\ x y z -> foo) = bar
@@ -818,7 +815,7 @@ RecordUpdate
 -- into a Pi telescope by 'mkFunOrPi') or as LHS binder patterns.
 Expr4 :: { Expr }
 Expr4 : Expr1 '=' Expr       { Equal (getRange ($1, $2, $3)) $1 $3 }
-      | 'module' Application ':' Expr {% mkModuleAscriptionExpr (getRange ($1, $2, $3, $4)) $2 $4 }
+      | Application 'with' 'module' ':' Expr {% mkModuleAscriptionExpr (getRange ($1, $2, $3, $4, $5)) $1 $5 }
       | Expr                 { $1 }
 
 ExprOrAttr :: { Expr }

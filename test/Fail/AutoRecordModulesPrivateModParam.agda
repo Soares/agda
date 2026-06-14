@@ -1,6 +1,5 @@
 -- Record module synonyms for module parameters are private:
 -- the parameters are not part of the module's public interface.
-{-# OPTIONS --auto-record-modules #-}
 module AutoRecordModulesPrivateModParam where
 
 open import Agda.Builtin.Nat
@@ -10,7 +9,7 @@ record Magma : Set₁ where
     Carrier : Set
     _∘_     : Carrier → Carrier → Carrier
 
-module WithParam (X : Magma) where
+module WithParam (module X : Magma) where
   double : X.Carrier → X.Carrier
   double x = x X.∘ x
 

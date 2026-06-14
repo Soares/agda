@@ -137,21 +137,21 @@ letTest =
 
 -- Record-headed @module@-marked ascriptions give clause-scoped synonyms.
 annSyn : (X : Magma) → Magma.Carrier X → Magma.Carrier X
-annSyn (module A : Magma) x = x A.∘ x
+annSyn (A with module : Magma) x = x A.∘ x
 
 -- Multiple variables in one ascription atom.
 annTwo : Magma → Magma → Nat
-annTwo (module A B : Magma) = 0
+annTwo (A B with module : Magma) = 0
 
 -- The synonym is in scope in with-expressions
 -- (via the implicit where module).
 annWith : (X : Magma) → Magma.Carrier X → Nat
-annWith (module A : Magma) x with x A.∘ x
+annWith (A with module : Magma) x with x A.∘ x
 ... | _ = 2
 
 -- ... and in where blocks.
 annWhere : (X : Magma) → Magma.Carrier X → Magma.Carrier X
-annWhere (module A : Magma) x = twice
+annWhere (A with module : Magma) x = twice
   where
     twice : Magma.Carrier A
     twice = x A.∘ x
@@ -162,8 +162,8 @@ record Pair : Set₁ where
     fst snd : Magma
 
 mkPair : Magma → Pair
-mkPair (module A : Magma) .Pair.fst = A
-mkPair (module A : Magma) .Pair.snd = record
+mkPair (A with module : Magma) .Pair.fst = A
+mkPair (A with module : Magma) .Pair.snd = record
   { Carrier = A.Carrier ; _∘_ = A._∘_ }
 
 -- Unnamed instance and hidden function-space domains (their hiding
@@ -186,10 +186,10 @@ useViaHid _ = 0
 
 -- @module@-marked binders in using statements.
 useUsing : (X : Magma) → Magma.Carrier X → Magma.Carrier X
-useUsing X x using (module A : Magma) ← X = x A.∘ x
+useUsing X x using (A with module : Magma) ← X = x A.∘ x
 
 useUsingWhere : (X : Magma) → Magma.Carrier X → Magma.Carrier X
-useUsingWhere X x using (module A : Magma) ← X = twice
+useUsingWhere X x using (A with module : Magma) ← X = twice
   where
     twice : Magma.Carrier A
     twice = x A.∘ x
@@ -197,7 +197,7 @@ useUsingWhere X x using (module A : Magma) ← X = twice
 -- Pi-bound variables of record type get a synonym for the rest of the
 -- telescope and the codomain (used heavily in dependent signatures).
 piSyn : ∀ (module A : Magma) {q : A.Carrier} → A.Carrier → A.Carrier
-piSyn (module A : Magma) x = x A.∘ x
+piSyn (A with module : Magma) x = x A.∘ x
 
 -- Record parameters of record type get a synonym inside the record
 -- module: in field types, in the constructor type, and in non-field
@@ -211,7 +211,7 @@ record MagmaHom (module A B : Magma) : Set where
   mapTwice a = map (a A.∘ a) B.∘ resp a
 
 idHom : (A : Magma) → MagmaHom A A
-idHom (module A : Magma) = record { map = λ a → a ; resp = λ a → a A.∘ a }
+idHom (A with module : Magma) = record { map = λ a → a ; resp = λ a → a A.∘ a }
 
 -- The synonym also works when the record definition is separate from
 -- its signature, including renamed parameters and omitted hidden ones.
@@ -281,11 +281,11 @@ data Walk (module A : Magma) (a : A.Carrier) : Set where
   stop : Walk A a
   step : A.Carrier → Walk A a → Walk A a
 
--- NB: separate arrows, not a grouped `(module A : Magma) (a : A.Carrier)`
--- telescope — grouping a `module` binder with a following classic binder in
--- a Pi *type* is a known parser gap (see synonym-task-queue memory).
-walkTwo : (module A : Magma) → (a : A.Carrier) → Walk A a
-walkTwo (module A : Magma) a = step (a A.∘ a) stop
+-- Grouped bare-arrow telescope: (module A : Magma) (a : A.Carrier) → …
+-- now parses without a leading ∀.  The `(A with module : Cat)` nested
+-- form has a different shape from the TBind binder, so no LALR collision.
+walkTwo : (module A : Magma) (a : A.Carrier) → Walk A a
+walkTwo (A with module : Magma) a = step (a A.∘ a) stop
 
 -- The synonym is in scope in the indices and works with a separate
 -- signature and renamed parameters.
@@ -296,7 +296,7 @@ data SepWalk B where
 -- Hidden @module@-marked ascriptions give clause-scoped synonyms too
 -- (dogfooding blocker: f {S1 : Spec} ... in WildBracket).
 hidSyn : ∀ {A : Magma} → Magma.Carrier A → Magma.Carrier A
-hidSyn {module A : Magma} x = x A.∘ x
+hidSyn {A with module : Magma} x = x A.∘ x
 
 -- Shadowed @module@-marked binders: the synonym follows variable
 -- shadowing (last wins), rather than generating a clashing pair of
