@@ -1244,6 +1244,7 @@ instance BlankVars RHS where
   blank bound AbsurdRHS              = AbsurdRHS
   blank bound (WithRHS _ es clauses) = __IMPOSSIBLE__ -- NZ
   blank bound (RewriteRHS xes spats rhs _) = __IMPOSSIBLE__ -- NZ
+  blank bound (LetRHS _ _) = __IMPOSSIBLE__ -- NZ
 
 instance BlankVars A.LamBinding where
   blank bound b@A.DomainFree{} = b

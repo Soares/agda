@@ -412,6 +412,7 @@ instance ExprLike RHS where
       AbsurdRHS{}             -> pure rhs
       WithRHS x es cs         -> WithRHS x <$> rec es <*> rec cs
       RewriteRHS xes spats rhs ds -> RewriteRHS <$> rec xes <*> pure spats <*> rec rhs <*> rec ds
+      LetRHS lets rhs         -> LetRHS <$> rec lets <*> rec rhs
     where
       rec :: RecurseExprRecFn m
       rec e = recurseExpr f e
@@ -593,6 +594,7 @@ instance DeclaredNames RHS where
     AbsurdRHS                 -> mempty
     WithRHS _q _es cls        -> declaredNames cls
     RewriteRHS _qes _ rhs cls -> declaredNames rhs <> declaredNames cls
+    LetRHS _ rhs              -> declaredNames rhs
 
 -- Andreas, 2020-04-13: Migration from Agda.Syntax.Abstract.AllNames
 --

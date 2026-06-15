@@ -1830,13 +1830,15 @@ scopeCheckLetDef wh d = setCurrentRange d do
         Right p -> do
           rhs <- toAbstract rhs
           setCurrentRange p0 $ do
+            let synAnns = letPatSynonymAnns p
             p   <- toAbstract p
             checkValidLetPattern p
             checkPatternLinearity p $ \ys ->
               typeError $ RepeatedVariablesInPattern ys
             bindVarsToBind
             p   <- toAbstract p
-            return $ singleton $ A.LetPatBind (LetRange r) ai p rhs
+            lets <- catMaybes <$> mapM (uncurry autoRecordLetSynonym) synAnns
+            return $ A.LetPatBind (LetRange r) ai p rhs :| lets
         -- It's not a record pattern, so it should be a prefix left-hand side
         Left err ->
           case definedName p0 of
@@ -2953,6 +2955,23 @@ targetParts = \case
           C.Paren _ e -> go acc e
           _           -> acc
 
+-- | Collect @(name, type)@ pairs for every @SynonymBinder@-annotated
+--   'C.AnnP' sub-pattern found in a concrete let-binding pattern.
+--   Called before 'toAbstract' on the pattern, so the concrete names
+--   and types are still available; the actual synonym 'A.LetBinding's
+--   are generated (via 'autoRecordLetSynonym') after 'toAbstract' has
+--   put the bound variables into scope.
+letPatSynonymAnns :: C.Pattern -> [(C.Name, C.Expr)]
+letPatSynonymAnns = \case
+  C.AnnP _ b ty
+    | C.binderModuleSynonym b == SynonymBinder ->
+        (C.boundName $ C.binderName b, ty) :
+        maybe [] letPatSynonymAnns (C.binderPattern b)
+    | otherwise -> maybe [] letPatSynonymAnns (C.binderPattern b)
+  C.AsP _ _ p   -> letPatSynonymAnns p
+  C.ParenP _ p  -> letPatSynonymAnns p
+  _              -> []
+
 -- | Run a module-synonym generator only when the binder\/signature was
 --   marked with the @module@ keyword (fork feature); otherwise nothing.
 whenSynonym :: BinderModuleSynonym -> ScopeM (Maybe a) -> ScopeM (Maybe a)
@@ -3810,16 +3829,31 @@ patternAscriptions = foldrCPattern step
     step _ acc = acc
 
 whereToAbstract
-  :: Range                            -- ^ The range of the @where@ block.
-  -> [(C.Name, C.Expr)]               -- ^ Type-ascribed pattern variables of the clause.
-  -> C.WhereClause                    -- ^ The @where@ block.
-  -> ScopeM a                         -- ^ The scope-checking task to be run in the context of the @where@ module.
-  -> ScopeM (a, A.WhereDeclarations)  -- ^ Additionally return the scope-checked contents of the @where@ module.
+  :: Range                                       -- ^ The range of the @where@ block.
+  -> [(C.Name, C.Expr)]                          -- ^ Type-ascribed pattern variables of the clause.
+  -> C.WhereClause                               -- ^ The @where@ block.
+  -> ScopeM AbstractRHS                          -- ^ The scope-checking task to be run in the context of the @where@ module.
+  -> ScopeM (AbstractRHS, A.WhereDeclarations)  -- ^ Additionally return the scope-checked contents of the @where@ module.
 whereToAbstract r anns wh inner = do
   case wh of
     NoWhere
       | null anns -> ret
-      | otherwise -> enter $ whereToAbstract1 r defaultErased Nothing anns [] inner
+      | otherwise -> do
+          -- Use let-bindings rather than a where-module so that outer
+          -- function parameters remain ordinary lambda-variables (not
+          -- module-free variables) — this keeps `with`-abstraction working.
+          --
+          -- localScope: the synonym module names (e.g. `A`) must be in scope
+          -- when checking the RHS (`inner`), but must NOT leak into the outer
+          -- module scope — otherwise a later clause or sibling definition
+          -- that also uses `A` would trigger ShadowedModule.  The generated
+          -- `A.LetBinding`s (abstract values) are returned outside the local
+          -- scope and processed by the type-checker instead.
+          (lets, result) <- localScope $ do
+            lets <- catMaybes <$> mapM (uncurry autoRecordLetSynonym) anns
+            result <- inner
+            return (lets, result)
+          return (LetSynonymRHS lets result, A.noWhereDecls)
     AnyWhere _ [] | null anns -> warnEmptyWhere
     AnyWhere _ ds -> enter do
       -- Andreas, 2016-07-17 issues #2081 and #2101
@@ -3844,13 +3878,13 @@ whereToAbstract r anns wh inner = do
     ret
 
 whereToAbstract1
-  :: Range                            -- ^ The range of the @where@-block.
-  -> Erased                           -- ^ Is the where module erased?
-  -> Maybe (C.Name, Access)           -- ^ The name of the @where@ module (if any).
-  -> [(C.Name, C.Expr)]               -- ^ Type-ascribed pattern variables of the clause.
-  -> [C.Declaration]                  -- ^ The contents of the @where@ module.
-  -> ScopeM a                         -- ^ The scope-checking task to be run in the context of the @where@ module.
-  -> ScopeM (a, A.WhereDeclarations)  -- ^ Additionally return the scope-checked contents of the @where@ module.
+  :: Range                                       -- ^ The range of the @where@-block.
+  -> Erased                                      -- ^ Is the where module erased?
+  -> Maybe (C.Name, Access)                      -- ^ The name of the @where@ module (if any).
+  -> [(C.Name, C.Expr)]                          -- ^ Type-ascribed pattern variables of the clause.
+  -> [C.Declaration]                             -- ^ The contents of the @where@ module.
+  -> ScopeM AbstractRHS                          -- ^ The scope-checking task to be run in the context of the @where@ module.
+  -> ScopeM (AbstractRHS, A.WhereDeclarations)  -- ^ Additionally return the scope-checked contents of the @where@ module.
 whereToAbstract1 r e whname anns whds inner = do
   -- ASR (16 November 2015) Issue 1137: We ban termination
   -- pragmas inside `where` clause.
@@ -3947,6 +3981,11 @@ data AbstractRHS
     -- ^ The with clauses haven't been translated yet
   | RHS' A.Expr C.Expr
   | RewriteRHS' [RewriteEqn' () A.BindName A.Pattern A.Expr] AbstractRHS A.WhereDeclarations
+  | LetSynonymRHS [A.LetBinding] AbstractRHS
+    -- ^ Synonym let-bindings to wrap around an RHS expression.  Used when
+    --   module-synonym annotations are present but there is no @where@-block,
+    --   so that outer parameters stay ordinary lambda-variables (not
+    --   module-free variables) and @with@-abstraction on them continues to work.
 
 qualifyName_ :: A.Name -> ScopeM A.QName
 qualifyName_ x = do
@@ -4018,6 +4057,8 @@ instance ToAbstract AbstractRHS where
   toAbstract (WithRHS' es cs) = do
     aux <- withFunctionName "with-"
     A.WithRHS aux es <$> do toAbstract =<< sequence cs
+  toAbstract (LetSynonymRHS [] rhs) = toAbstract rhs
+  toAbstract (LetSynonymRHS lets rhs) = A.LetRHS lets <$> toAbstract rhs
 
 instance ToAbstract RightHandSide where
   type AbsOfCon RightHandSide = AbstractRHS

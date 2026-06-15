@@ -542,6 +542,7 @@ makeRHSEmptyRecord = \case
   rhs@A.RewriteRHS{} -> rhs{ A.rewriteRHS = makeRHSEmptyRecord $ A.rewriteRHS rhs }
   A.AbsurdRHS        -> __IMPOSSIBLE__
   A.WithRHS{}        -> __IMPOSSIBLE__
+  A.LetRHS{}         -> __IMPOSSIBLE__
 
 -- | Make clause with no rhs (because of absurd match).
 

@@ -500,6 +500,7 @@ instance HasLHSCores A.RHS where
   mapLHSCores f = \case
     A.WithRHS aux es cs -> A.WithRHS aux es $ for cs $ mapLHSCores f
     A.RewriteRHS qes spats rhs wh -> A.RewriteRHS qes spats (mapLHSCores f rhs) wh
+    A.LetRHS lets rhs -> A.LetRHS lets $ mapLHSCores f rhs
     rhs@A.AbsurdRHS -> rhs
     rhs@A.RHS{}     -> rhs
 
@@ -753,6 +754,7 @@ checkClause t withSubAndLets c@(A.Clause lhs@(A.SpineLHS i x aps) strippedPats r
             updateRHS (A.WithRHS q es cs)       = A.WithRHS q es $ fmap updateClause cs
             updateRHS (A.RewriteRHS qes spats rhs wh) =
               A.RewriteRHS qes (applySubst patSubst spats) (updateRHS rhs) wh
+            updateRHS (A.LetRHS lets rhs)       = A.LetRHS lets $ updateRHS rhs
 
             updateClause (A.Clause f spats rhs wh ca) =
               A.Clause f (applySubst patSubst spats) (updateRHS rhs) wh ca
@@ -851,6 +853,7 @@ checkRHS i x aps t lhsResult@(LHSResult _ delta ps absurdPat trhs _ _asb _ _) rh
     A.AbsurdRHS                -> noRHS
     A.RewriteRHS eqs ps rhs wh -> rewriteEqnsRHS eqs ps rhs wh
     A.WithRHS aux es cs        -> withRHS aux es cs
+    A.LetRHS lets rhs          -> checkLetBindings' lets $ handleRHS rhs
 
   -- Ordinary case: f xs = e
   ordinaryRHS :: A.Expr -> TCM (Maybe Term, WithFunctionProblem)

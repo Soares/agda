@@ -473,6 +473,11 @@ data RHS
       -- ^ The where clauses are attached to the @RewriteRHS@ by
       ---  the scope checker (instead of to the clause).
     }
+  | LetRHS [LetBinding] RHS
+    -- ^ Module-synonym let-bindings to install before checking the inner RHS.
+    --   Generated when a clause has synonym annotations but no @where@-block,
+    --   so that outer function parameters remain ordinary variables (not
+    --   module-free variables) and @with@-abstraction on them continues to work.
   deriving (Show, Generic)
 
 -- | Ignore 'rhsConcrete' when comparing 'RHS's.
@@ -481,6 +486,7 @@ instance Eq RHS where
   AbsurdRHS        == AbsurdRHS           = True
   WithRHS a b c    == WithRHS a' b' c'    = (a == a') && (b == b') && (c == c')
   RewriteRHS a b c d == RewriteRHS a' b' c' d' = and [ a == a', b == b', c == c' , d == d' ]
+  LetRHS a b         == LetRHS a' b'            = (a == a') && (b == b')
   _                == _                   = False
 
 -- | The lhs of a clause in spine view (inside-out).
@@ -773,6 +779,7 @@ instance HasRange RHS where
     getRange (RHS e _)                 = getRange e
     getRange (WithRHS _ e cs)          = fuseRange e cs
     getRange (RewriteRHS xes _ rhs wh) = getRange (xes, rhs, wh)
+    getRange (LetRHS _ rhs)            = getRange rhs
 
 instance HasRange WhereDeclarations where
   getRange (WhereDecls _ _ ds) = getRange ds
@@ -929,6 +936,7 @@ instance KillRange RHS where
   killRange (RHS e c)                = killRangeN RHS e c
   killRange (WithRHS q e cs)         = killRangeN WithRHS q e cs
   killRange (RewriteRHS xes spats rhs wh) = killRangeN RewriteRHS xes spats rhs wh
+  killRange (LetRHS lets rhs)        = killRangeN LetRHS lets rhs
 
 instance KillRange WhereDeclarations where
   killRange (WhereDecls a b c) = killRangeN WhereDecls a b c
@@ -1273,6 +1281,7 @@ rhsSpine = \case
   WithRHS _ _ cs        -> WithRHSS $ fmap clauseSpine cs
   RewriteRHS _ _ rhs ws ->
     RewriteRHSS (rhsSpine rhs) (whereDeclarationsSpine ws)
+  LetRHS _ rhs          -> rhsSpine rhs
 
 -- | The spine corresponding to a 'WhereDeclarations' value.
 

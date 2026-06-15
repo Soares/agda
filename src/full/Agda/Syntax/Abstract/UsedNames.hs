@@ -126,6 +126,7 @@ instance BoundAndUsed RHS where
     AbsurdRHS               -> mempty
     WithRHS _ es cs         -> boundAndUsed (es, cs)
     RewriteRHS eqns _ rhs _ -> boundAndUsed (eqns, rhs)
+    LetRHS _ rhs            -> boundAndUsed rhs
 
 instance BoundAndUsed LHS where
   boundAndUsed = boundAndUsed . lhsCore

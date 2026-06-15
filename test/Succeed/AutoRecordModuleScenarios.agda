@@ -29,12 +29,16 @@ letBind (A with Magma module) x =
       y = x A.∘ x
   in y
 
--- Synonym in scope when branching via if/then/else.
--- NOTE: `with` abstraction on a plain parameter in the same clause as a
--- module-synonym annotation triggers WithOnFreeVariable, because the synonym
--- scoping mechanism wraps the whole clause in an implicit where-module, making
--- all outer parameters module-telescope variables (over which `with` may not
--- abstract).  Use `if/then/else` or a helper to work around this.
+-- `with`-abstraction alongside a module-synonym annotation.
+-- The synonym scoping uses a let-binding rather than a where-module, so outer
+-- function parameters remain ordinary variables (not module-free variables) and
+-- `with` may abstract over them normally.
+withSynonym : Bool → (module A : Magma) → Magma.Carrier A → Magma.Carrier A → Magma.Carrier A
+withSynonym b (A with Magma module) x y with b
+... | true  = x A.∘ x
+... | false = y A.∘ y
+
+-- Synonym in scope when branching via pattern matching (alternative to `with`).
 ifSynonym : Bool → (module A : Magma) → Magma.Carrier A → Magma.Carrier A → Magma.Carrier A
 ifSynonym true  (A with Magma module) x _ = x A.∘ x
 ifSynonym false (A with Magma module) _ y = y A.∘ y
@@ -58,3 +62,10 @@ module WithSectionParam (module A : Magma) where
 -- Grouped binder: two synonyms, same record type.
 pairOp : (module A B : Magma) → Magma.Carrier A → Magma.Carrier B → Magma.Carrier B
 pairOp (A with Magma module) (B with Magma module) _ y = y B.∘ y
+
+-- Let-PATTERN binding: synonym available in the continuation body.
+-- `let (B with Magma module) = m in body` must bring B.∘ into scope.
+letPatSynonym : (m : Magma) → Magma.Carrier m → Magma.Carrier m
+letPatSynonym m x =
+  let (B with Magma module) = m
+  in x B.∘ x

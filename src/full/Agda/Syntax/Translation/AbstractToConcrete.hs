@@ -1209,6 +1209,7 @@ instance ToConcrete A.RHS where
       unless (null eqs') __IMPOSSIBLE__
       eqs <- toConcrete xeqs
       return (rhs, eqs, es, wh ++ whs)
+    toConcrete (A.LetRHS _ rhs) = toConcrete rhs
 
 instance (ToConcrete p, ToConcrete a) => ToConcrete (RewriteEqn' qn A.BindName p a) where
   type ConOfAbs (RewriteEqn' qn A.BindName p a) = (RewriteEqn' () C.Name (ConOfAbs p) (ConOfAbs a))

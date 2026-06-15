@@ -279,6 +279,8 @@ buildWithFunction cxtNames f aux t delta qs npars withSub perm n1 n cs = mapM bu
       mapM ((A.spineToLhs . permuteNamedDots) <.> buildWithClause . A.lhsToSpine) cs
     buildRHS strippedPats1 (A.RewriteRHS qes strippedPats2 rhs wh) =
       flip (A.RewriteRHS qes (applySubst withSub $ strippedPats1 ++ strippedPats2)) wh <$> buildRHS [] rhs
+    buildRHS strippedPats (A.LetRHS lets rhs) =
+      A.LetRHS lets <$> buildRHS strippedPats rhs
 
     -- The stripped patterns computed by buildWithClause lives in the context
     -- of the top with-clause (of the current call to buildWithFunction). When

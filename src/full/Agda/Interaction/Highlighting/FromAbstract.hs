@@ -329,6 +329,7 @@ instance Hilite A.RHS where
       A.AbsurdRHS                          -> mempty
       A.WithRHS _q es cs                   -> hl es  <> hl cs  -- No highlighting for with-function-name!
       A.RewriteRHS eqs strippedPats rhs wh -> hl eqs <> hl strippedPats <> hl rhs <> hl wh
+      A.LetRHS lets rhs                    -> hl lets <> hl rhs
     where
     hl a = hilite a
 
