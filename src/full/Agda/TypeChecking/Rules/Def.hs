@@ -58,6 +58,9 @@ import Agda.TypeChecking.Primitive hiding (Nat)
 import Agda.TypeChecking.RecordPatterns ( recordRHSToCopatterns )
 import Agda.TypeChecking.Sort
 
+import Agda.Syntax.Scope.Base (AbstractName, anameName, allNamesInScope, scopeModules)
+
+import Agda.TypeChecking.Records (isRecordType)
 import Agda.TypeChecking.Rules.Term
 import Agda.TypeChecking.Rules.LHS                 ( checkLeftHandSide, LHSResult(..), bindAsPatterns, LetOrClause(ClauseLHS) )
 import {-# SOURCE #-} Agda.TypeChecking.Rules.Decl ( checkDecls )
@@ -224,6 +227,69 @@ checkAlias t ai i name e mc =
   reportSDoc "tc.def.alias" 20 $ "checkAlias: leaving"
 
 
+-- | Resolve 'A.LHSPostfixProj' nodes in a clause's LHS using the function's
+--   declared type.  Under @--postfix-methods@, a copattern like @f .field = rhs@
+--   is scope-checked as 'LHSPostfixProj' because the field name is not in the
+--   ambient scope.  Here, with the declared type @t@ available, we look up the
+--   name in the record module of the target type and replace the deferred node
+--   with a proper 'A.LHSProj'.
+resolvePostfixCopats :: Type -> A.Clause -> TCM A.Clause
+resolvePostfixCopats t (A.Clause lhs spats rhs wh catchall) = do
+  lhs' <- resolveLHS lhs
+  return $ A.Clause lhs' spats rhs wh catchall
+  where
+  resolveLHS (A.LHS i core) = A.LHS i <$> go t core
+
+  -- Walk the LHSCore inside-out, threading the current target type.
+  -- Returns (resolved core, return type after all projections in this core).
+  go :: Type -> A.LHSCore -> TCM A.LHSCore
+  go ty core = fst <$> goWithType ty core
+
+  goWithType :: Type -> A.LHSCore -> TCM (A.LHSCore, Type)
+  goWithType ty = \case
+    core@(A.LHSHead _ _) -> return (core, ty)
+    A.LHSWith core wps ps -> do
+      (core', retTy) <- goWithType ty core
+      return (A.LHSWith core' wps ps, retTy)
+    A.LHSProj d h ps -> do
+      (h', innerTy) <- goWithType ty (namedArg h)
+      retTy <- projectionReturnType (A.headAmbQ d) innerTy
+      return (A.LHSProj d (setNamedArg h h') ps, retTy)
+    A.LHSPostfixProj patInfo rawName h ps -> do
+      (h', innerTy) <- goWithType ty (namedArg h)
+      q <- resolveInRecord innerTy rawName
+      retTy <- projectionReturnType q innerTy
+      return (A.LHSProj (AmbQ (q :| [])) (setNamedArg h h') ps, retTy)
+
+  -- Look up a concrete name in the record module of the given type.
+  resolveInRecord :: Type -> C.QName -> TCM QName
+  resolveInRecord ty rawName = do
+    ty' <- reduce ty
+    isRecordType ty' >>= \case
+      Nothing       -> notInScopeError rawName
+      Just (r, _, _) -> do
+        n <- maybe (notInScopeError rawName) return $ C.isUnqualified rawName
+        scope <- getScope
+        case Map.lookup (A.qnameToMName r) (scope ^. scopeModules) of
+          Nothing -> notInScopeError rawName
+          Just s  -> case Map.lookup n (allNamesInScope s) :: Maybe (List1 AbstractName) of
+            Just (an :| _) -> return (anameName an)
+            Nothing        -> notInScopeError rawName
+
+  -- Get the return type of projection q applied to something of type ty.
+  projectionReturnType :: QName -> Type -> TCM Type
+  projectionReturnType q ty = do
+    ty' <- reduce ty
+    isRecordType ty' >>= \case
+      Nothing          -> return ty  -- not a record; leave type unchanged
+      Just (_, pars, _) -> do
+        qTy  <- defType <$> getConstInfo q
+        -- qTy = Π {params} → (self : R params) → FieldType
+        qTy' <- piApplyM qTy pars          -- strip record parameters
+        reduce qTy' >>= \case
+          El _ (Pi _ b) -> return (absBody b)  -- strip self → get field/method type
+          other         -> return other
+
 -- | Type check a definition by pattern matching.
 checkFunDef' ::
      Type             -- ^ The type we expect the function to have.
@@ -262,6 +328,10 @@ checkFunDefS t ai extlam with i name cs = do
 
         reportSDoc "tc.def.fun" 70 $
           sep $ "clauses:" : fmap (nest 2 . text . show . A.deepUnscope) cs
+
+        -- Resolve any LHSPostfixProj nodes (from --postfix-methods copatterns) before
+        -- converting to spine form, using the function's declared type.
+        cs <- mapM (resolvePostfixCopats t) cs
 
         cs <- return $! fmap A.lhsToSpine cs
 

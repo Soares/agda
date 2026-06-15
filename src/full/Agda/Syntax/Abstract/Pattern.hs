@@ -437,14 +437,15 @@ instance LHSToSpine LHS SpineLHS where
 
 lhsCoreToSpine :: LHSCore' e -> A.QNamed [NamedArg (Pattern' e)]
 lhsCoreToSpine = \case
-  LHSHead f ps     -> QNamed f ps
-  LHSProj d h ps   -> lhsCoreToSpine (namedArg h) <&> (++ (p : ps))
+  LHSHead f ps          -> QNamed f ps
+  LHSProj d h ps        -> lhsCoreToSpine (namedArg h) <&> (++ (p : ps))
     where p = updateNamedArg (const $ ProjP empty ProjPrefix d) h
-  LHSWith h wps ps -> lhsCoreToSpine h <&> (++ map fromWithPat (List1.toList wps) ++ ps)
+  LHSWith h wps ps      -> lhsCoreToSpine h <&> (++ map fromWithPat (List1.toList wps) ++ ps)
     where
       fromWithPat :: Arg (Pattern' e) -> NamedArg (Pattern' e)
       fromWithPat = fmap (unnamed . mkWithP)
       mkWithP p   = WithP (PatRange $ getRange p) p
+  LHSPostfixProj{}      -> __IMPOSSIBLE__  -- must be resolved before lhsCoreToSpine
 
 spineToLhsCore :: IsProjP e => QNamed [NamedArg (Pattern' e)] -> LHSCore' e
 spineToLhsCore (QNamed f ps) = lhsCoreAddSpine (LHSHead f []) ps
@@ -496,6 +497,7 @@ lhsCoreToPattern lc =
     LHSHead f aps         -> DefP noInfo (unambiguous f) aps
     LHSProj d lhscore aps -> DefP noInfo d $
       fmap (fmap lhsCoreToPattern) lhscore : aps
+    LHSPostfixProj{}      -> __IMPOSSIBLE__  -- must be resolved before lhsCoreToPattern
     LHSWith h wps aps     -> case lhsCoreToPattern h of
       DefP r q ps         -> DefP r q $ ps ++ map fromWithPat (List1.toList wps) ++ aps
         where
@@ -507,6 +509,7 @@ lhsCoreToPattern lc =
 
 mapLHSHead :: (QName -> [NamedArg Pattern] -> LHSCore) -> LHSCore -> LHSCore
 mapLHSHead f = \case
-  LHSHead x ps     -> f x ps
-  LHSProj d h ps   -> LHSProj d (fmap (fmap (mapLHSHead f)) h) ps
-  LHSWith h wps ps -> LHSWith (mapLHSHead f h) wps ps
+  LHSHead x ps              -> f x ps
+  LHSProj d h ps            -> LHSProj d (fmap (fmap (mapLHSHead f)) h) ps
+  LHSWith h wps ps          -> LHSWith (mapLHSHead f h) wps ps
+  LHSPostfixProj i n h ps   -> LHSPostfixProj i n (fmap (fmap (mapLHSHead f)) h) ps

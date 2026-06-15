@@ -3741,18 +3741,61 @@ instance ToAbstract CLHSCore where
         x <- withLocalVars do
           setLocalVars []
           toAbstractOldName x
-        ps <- toAbstract $ (fmap . fmap . fmap) (CPattern displayLhs) ps
-        A.LHSHead x <$> mergeEqualPs ps
+        usePostfix <- optPostfixMethods <$> pragmaOptions
+        case splitOnDotProjs usePostfix ps of
+          -- No postfix copatterns: normal path
+          Nothing -> do
+            ps' <- toAbstract $ (fmap . fmap . fmap) (CPattern displayLhs) ps
+            A.LHSHead x <$> mergeEqualPs ps'
+          -- Found DotP copatterns: build nested LHSPostfixProj structure
+          Just (headArgs, copatSegs) -> do
+            headArgs' <- toAbstract $ (fmap . fmap . fmap) (CPattern displayLhs) headArgs
+            headArgs'' <- mergeEqualPs headArgs'
+            foldM (\acc (cname, segArgs) -> do
+              segArgs' <- toAbstract $ (fmap . fmap . fmap) (CPattern displayLhs) segArgs
+              segArgs'' <- mergeEqualPs segArgs'
+              let patInfo = PatRange $ getRange cname
+              return $ A.LHSPostfixProj patInfo cname (defaultNamedArg acc) segArgs''
+              ) (A.LHSHead x headArgs'') copatSegs
+      where
+      -- | When @--postfix-methods@ is on, split a pattern list at
+      --   @DotP kwr r (Ident n)@ boundaries. Returns Nothing if there are
+      --   no dot-projection patterns.
+      splitOnDotProjs
+        :: Bool
+        -> [NamedArg C.Pattern]
+        -> Maybe ([NamedArg C.Pattern], [(C.QName, [NamedArg C.Pattern])])
+      splitOnDotProjs False _  = Nothing
+      splitOnDotProjs True  ps =
+        case break isDotProjPat ps of
+          (_, []) -> Nothing
+          (prefix, rest) -> Just (prefix, buildSegs rest)
+        where
+        isDotProjPat :: NamedArg C.Pattern -> Bool
+        isDotProjPat p = case namedArg p of
+          C.DotP _ _ (C.Ident n) -> isJust (C.isUnqualified n)
+          _                      -> False
+        buildSegs :: [NamedArg C.Pattern] -> [(C.QName, [NamedArg C.Pattern])]
+        buildSegs [] = []
+        buildSegs (p : rest) =
+          let C.DotP _ _ (C.Ident n) = namedArg p
+              (args, rest') = break isDotProjPat rest
+          in (n, args) : buildSegs rest'
 
     C.LHSProj d ps1 core ps2 -> do
         unless (null ps1) $ typeError $ IllformedProjectionPatternConcrete (foldl C.AppP (C.IdentP True d) ps1)
-        x <- resolveName d >>= \case
-          FieldName ds -> pure (ambigName ds)
+        usePostfix <- optPostfixMethods <$> pragmaOptions
+        mds <- resolveName d >>= \case
+          FieldName ds -> return $ Just (fmap anameName ds)
+          UnknownName  | usePostfix, isJust (C.isUnqualified d) -> return Nothing
           UnknownName  -> notInScopeError d
           _            -> typeError $ CopatternHeadNotProjection d
         core <- toAbstract $ (fmap . fmap) (CLHSCore displayLhs) core
         ps2  <- toAbstract $ (fmap . fmap . fmap) (CPattern displayLhs) ps2
-        A.LHSProj x core <$> mergeEqualPs ps2
+        ps2' <- mergeEqualPs ps2
+        case mds of
+          Just ds -> return $ A.LHSProj (AmbQ ds) core ps2'
+          Nothing -> return $ A.LHSPostfixProj (PatRange $ getRange d) d core ps2'
 
     C.LHSWith core wps ps -> do
       -- DISPLAY pragmas cannot have @with@, so no need to pass on @displayLhs@.
@@ -3793,9 +3836,10 @@ instance ToAbstract c a => ToAbstract (A.LHSCore' c) (A.LHSCore' a) where
 
 instance ToAbstract (A.LHSCore' C.Expr) where
     type AbsOfCon (A.LHSCore' C.Expr) = A.LHSCore' A.Expr
-    toAbstract (A.LHSHead f ps)         = A.LHSHead f <$> mapM toAbstract ps
-    toAbstract (A.LHSProj d lhscore ps) = A.LHSProj d <$> mapM toAbstract lhscore <*> mapM toAbstract ps
-    toAbstract (A.LHSWith core wps ps)  = liftA3 A.LHSWith (toAbstract core) (toAbstract wps) (toAbstract ps)
+    toAbstract (A.LHSHead f ps)              = A.LHSHead f <$> mapM toAbstract ps
+    toAbstract (A.LHSProj d lhscore ps)      = A.LHSProj d <$> mapM toAbstract lhscore <*> mapM toAbstract ps
+    toAbstract (A.LHSWith core wps ps)       = liftA3 A.LHSWith (toAbstract core) (toAbstract wps) (toAbstract ps)
+    toAbstract (A.LHSPostfixProj i n foc ps) = A.LHSPostfixProj i n <$> mapM toAbstract foc <*> mapM toAbstract ps
 
 -- Patterns are done in two phases. First everything but the dot patterns, and
 -- then the dot patterns. This is because dot patterns can refer to variables

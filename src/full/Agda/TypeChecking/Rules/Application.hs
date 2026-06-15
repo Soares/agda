@@ -33,8 +33,7 @@ import Agda.Syntax.Abstract.Views as A
 import qualified Agda.Syntax.Info as A
 import qualified Agda.Syntax.Concrete as C
 import Agda.Syntax.Concrete.Pretty () -- only Pretty instances
-import Agda.Syntax.Abstract.Name (AbstractName, anameName)
-import Agda.Syntax.Scope.Base (allNamesInScope, scopeModules)
+import Agda.Syntax.Scope.Base (AbstractName, anameName, allNamesInScope, scopeModules)
 import Agda.Syntax.Common
 import Agda.Syntax.Internal as I
 import Agda.Syntax.Position
@@ -1359,8 +1358,9 @@ checkPostfixMemberApp cmp e t x args = case args of
               Just p  -> projDropParsApply p ProjPostfix rel headArgs
               Nothing -> Def q $ map Apply headArgs
         thead <- piApplyM (defType def) headArgs
-        checkArguments cmp ExpandLast e rest thead t $ \ st ->
-          unfoldInlined =<< checkHeadConstraints (vhead `applyE`) st
+        checkArguments cmp ExpandLast e rest thead t $ \ st@(ACState _ _ t1 checkedTarget) -> do
+          v <- unfoldInlined =<< checkHeadConstraints (vhead `applyE`) st
+          coerce' cmp checkedTarget v t1 t
 
 -- | Resolve an unqualified concrete name as a member of a (record) module,
 --   using the stored scope of that module.  Returns the member's 'QName'.

@@ -316,9 +316,10 @@ instance Hilite A.LHS where
 
 instance (Hilite a, IsProjP a) => Hilite (A.LHSCore' a) where
   hilite = \case
-    A.LHSHead q ps       -> hilite q   <> hilite ps
-    A.LHSProj q lhs ps   -> hilite lhs <> hilite q   <> hilite ps -- TODO? Projection?
-    A.LHSWith lhs wps ps -> hilite lhs <> hilite wps <> hilite ps
+    A.LHSHead q ps            -> hilite q   <> hilite ps
+    A.LHSProj q lhs ps        -> hilite lhs <> hilite q   <> hilite ps -- TODO? Projection?
+    A.LHSWith lhs wps ps      -> hilite lhs <> hilite wps <> hilite ps
+    A.LHSPostfixProj _ _ h ps -> hilite h   <> hilite ps  -- name resolved later; no highlight yet
 
 instance Hilite A.RHS where
   hilite = \case

@@ -133,10 +133,11 @@ instance BoundAndUsed LHS where
 
 instance BoundAndUsed e => BoundAndUsed (LHSCore' e) where
   boundAndUsed = \ case
-    LHSHead _ ps       -> parBoundAndUsed ps
-    LHSProj _ lhs ps   -> lhs `parBindings` parBoundAndUsed ps
-    LHSWith lhs wps ps -> lhs `parBindings` parBoundAndUsed wps
-                              `parBindings` parBoundAndUsed ps
+    LHSHead _ ps            -> parBoundAndUsed ps
+    LHSProj _ lhs ps        -> lhs `parBindings` parBoundAndUsed ps
+    LHSWith lhs wps ps      -> lhs `parBindings` parBoundAndUsed wps
+                                   `parBindings` parBoundAndUsed ps
+    LHSPostfixProj _ _ h ps -> h `parBindings` parBoundAndUsed ps
 
 instance (BoundAndUsed x, BoundAndUsed p, BoundAndUsed e) => BoundAndUsed (RewriteEqn' q x p e) where
   boundAndUsed (Rewrite es)  = boundAndUsed $ snd <$> es

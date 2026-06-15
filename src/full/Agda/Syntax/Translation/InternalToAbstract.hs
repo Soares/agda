@@ -1181,6 +1181,7 @@ instance BlankVars A.LHSCore where
   blank bound (A.LHSHead f ps) = A.LHSHead f $ blank bound ps
   blank bound (A.LHSProj p b ps) = uncurry (A.LHSProj p) $ blank bound (b, ps)
   blank bound (A.LHSWith h wps ps) = uncurry (uncurry A.LHSWith) $ blank bound ((h, wps), ps)
+  blank _ A.LHSPostfixProj{} = __IMPOSSIBLE__  -- resolved before internal representation
 
 instance BlankVars A.Pattern where
   blank bound p = case p of
@@ -1265,9 +1266,10 @@ instance Binder A.LHS where
   varsBoundIn (A.LHS _ core) = varsBoundIn core
 
 instance Binder A.LHSCore where
-  varsBoundIn (A.LHSHead _ ps)     = varsBoundIn ps
-  varsBoundIn (A.LHSProj _ b ps)   = varsBoundIn (b, ps)
-  varsBoundIn (A.LHSWith h wps ps) = varsBoundIn ((h, wps), ps)
+  varsBoundIn (A.LHSHead _ ps)        = varsBoundIn ps
+  varsBoundIn (A.LHSProj _ b ps)      = varsBoundIn (b, ps)
+  varsBoundIn (A.LHSWith h wps ps)    = varsBoundIn ((h, wps), ps)
+  varsBoundIn A.LHSPostfixProj{}      = __IMPOSSIBLE__  -- resolved before internal representation
 
 instance Binder A.Pattern where
   varsBoundIn = foldAPattern $ \case

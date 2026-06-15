@@ -536,6 +536,17 @@ data LHSCore' e
              , lhsPats         :: [NamedArg (Pattern' e)]
                  -- ^ Further applied to patterns.
              }
+    -- | Unresolved postfix copattern projection under @--postfix-methods@.
+    --   The raw concrete name is resolved type-directedly in 'Agda.TypeChecking.Rules.Def'.
+  | LHSPostfixProj
+             { lhsPostfixInfo :: PatInfo
+             , lhsPostfixName :: C.QName
+                 -- ^ Raw unresolved projection name.
+             , lhsFocus       :: NamedArg (LHSCore' e)
+                 -- ^ The record value (inner copattern focus).
+             , lhsPats        :: [NamedArg (Pattern' e)]
+                 -- ^ Further applied to patterns.
+             }
   deriving (Show, Functor, Foldable, Traversable, Eq, Generic)
 
 type LHSCore = LHSCore' Expr
@@ -765,9 +776,10 @@ instance HasRange LHS where
     getRange (LHS i _)   = getRange i
 
 instance HasRange (LHSCore' e) where
-    getRange (LHSHead f ps)         = fuseRange f ps
-    getRange (LHSProj d lhscore ps) = d `fuseRange` lhscore `fuseRange` ps
-    getRange (LHSWith h wps ps)     = h `fuseRange` wps `fuseRange` ps
+    getRange (LHSHead f ps)              = fuseRange f ps
+    getRange (LHSProj d lhscore ps)      = d `fuseRange` lhscore `fuseRange` ps
+    getRange (LHSWith h wps ps)          = h `fuseRange` wps `fuseRange` ps
+    getRange (LHSPostfixProj i _ foc ps) = i `fuseRange` foc `fuseRange` ps
 
 instance HasRange a => HasRange (Clause' a) where
     getRange (Clause lhs _ rhs ds _catchall) = getRange (lhs, rhs, ds)
@@ -917,9 +929,10 @@ instance KillRange LHS where
   killRange (LHS i a)   = killRangeN LHS i a
 
 instance KillRange e => KillRange (LHSCore' e) where
-  killRange (LHSHead a b)   = killRangeN LHSHead a b
-  killRange (LHSProj a b c) = killRangeN LHSProj a b c
-  killRange (LHSWith a b c) = killRangeN LHSWith a b c
+  killRange (LHSHead a b)        = killRangeN LHSHead a b
+  killRange (LHSProj a b c)      = killRangeN LHSProj a b c
+  killRange (LHSWith a b c)      = killRangeN LHSWith a b c
+  killRange (LHSPostfixProj a b c d) = killRangeN LHSPostfixProj a b c d
 
 instance KillRange a => KillRange (Clause' a) where
   killRange (Clause lhs spats rhs ds catchall) = killRangeN Clause lhs spats rhs ds catchall
