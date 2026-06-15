@@ -274,11 +274,13 @@ data DoStmt
 
 -- | A Binder @x\@p@, the pattern is optional
 data Binder' a = Binder
-  { binderPattern    :: Maybe Pattern
-  , binderNameOrigin :: BinderNameOrigin
+  { binderPattern       :: Maybe Pattern
+  , binderNameOrigin    :: BinderNameOrigin
   , binderModuleSynonym :: BinderModuleSynonym
       -- ^ Did the user write @(module x : T)@? (Fork feature.)
-  , binderName       :: a
+  , binderName          :: a
+  , binderSynonymAlias  :: Maybe Name
+      -- ^ Optional @as Alias@: the generated module synonym uses @Alias@ instead of the bound name.
   } deriving (Eq, Functor, Foldable, Traversable)
 
 type Binder = Binder' BoundName
@@ -287,7 +289,7 @@ mkBinder_ :: Name -> Binder
 mkBinder_ = mkBinder . mkBoundName_
 
 mkBinder :: a -> Binder' a
-mkBinder = Binder Nothing UserBinderName PlainBinder
+mkBinder n = Binder Nothing UserBinderName PlainBinder n Nothing
 
 -- | Parameters supplied to data and record definitions (as opposed to their signatures)
 --   are stripped of their type information.
@@ -922,8 +924,8 @@ isBinderP = \case
   IdentP _ qn
              -> mkBinder_ <$> isUnqualified qn
   WildP r    -> pure $ mkBinder_ $ setRange r simpleHole
-  AsP r n p  -> pure $ Binder (Just p) UserBinderName PlainBinder $ mkBoundName_ n
-  ParenP r p -> pure $ Binder (Just p) UserBinderName PlainBinder $ mkBoundName_ $ setRange r simpleHole
+  AsP r n p  -> pure $ Binder (Just p) UserBinderName PlainBinder (mkBoundName_ n) Nothing
+  ParenP r p -> pure $ Binder (Just p) UserBinderName PlainBinder (mkBoundName_ $ setRange r simpleHole) Nothing
   _ -> Nothing
 
 {--------------------------------------------------------------------------
@@ -1032,7 +1034,7 @@ instance HasRange Expr where
 --     getRange (TeleFun x y) = fuseRange x y
 
 instance HasRange Binder where
-  getRange (Binder a _ _ b) = fuseRange a b
+  getRange (Binder a _ _ b _) = fuseRange a b
 
 instance HasRange (TacticAttribute' a) where
   getRange = maybe noRange getRange . theTacticAttribute
@@ -1219,7 +1221,7 @@ instance KillRange AsName where
   killRange (AsName n _) = killRangeN (flip AsName noRange) n
 
 instance KillRange Binder where
-  killRange (Binder a o s b) = killRangeN Binder a o s b
+  killRange (Binder a o s b al) = killRangeN Binder a o s b al
 
 instance KillRange BoundName where
   killRange (BName n f t b) = killRangeN BName n f t b
@@ -1583,7 +1585,7 @@ instance NFData a => NFData (LamBinding' a) where
   rnf (DomainFull a) = rnf a
 
 instance NFData Binder where
-  rnf (Binder a o s b) = rnf (a, o, s, b)
+  rnf (Binder a o s b al) = rnf (a, o, s, b, al)
 
 instance NFData BoundName where
   rnf (BName a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d

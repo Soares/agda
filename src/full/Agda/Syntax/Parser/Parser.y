@@ -597,7 +597,7 @@ BIdsWithHiding : Application {%
     Nothing   -> parseError "Expected sequence of possibly hidden bound identifiers"
     Just good -> forM (sconcat good) $ updateNamedArgA $ \ (n, me) -> do
                    p <- traverse exprToPattern me
-                   pure $ Binder p UserBinderName PlainBinder (mkBoundName_ n)
+                   pure $ Binder p UserBinderName PlainBinder (mkBoundName_ n) Nothing
     }
 
 

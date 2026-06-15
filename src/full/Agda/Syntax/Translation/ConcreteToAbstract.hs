@@ -827,7 +827,7 @@ toAbstractLam r bs e ctx = do
     -- type from 'makeDomainFull' and are skipped by the record-target
     -- analysis.
     lets <- catMaybes <$>
-      mapM (uncurry autoRecordLetSynonym) (telParamsWithTypes $ List1.toList tbs)
+      mapM autoRecordSynonymAnn (telParamsWithTypes $ List1.toList tbs)
     -- Translate the body
     e <- toAbstractCtx ctx e
     let e' = case lets of
@@ -1040,7 +1040,7 @@ instance ToAbstract C.Expr where
                     chunk = map fst chunk0
                     recBinders = [ b | (b, True) <- chunk0 ]
                 localToAbstract chunk $ \ chunk' -> do
-                  lets <- catMaybes <$> mapM (uncurry autoRecordLetSynonym)
+                  lets <- catMaybes <$> mapM autoRecordSynonymAnn
                             (concatMap (\ b -> telParamsWithTypes [b]) recBinders)
                   body <- go rest
                   let body' = case lets of
@@ -1295,7 +1295,7 @@ instance ToAbstract c => ToAbstract (FieldAssignment' c) where
 instance ToAbstract (C.Binder' (NewName C.BoundName)) where
   type AbsOfCon (C.Binder' (NewName C.BoundName)) = A.Binder
 
-  toAbstract (C.Binder p o _syn n) = do
+  toAbstract (C.Binder p o _syn n _al) = do
     let name = C.boundName $ newName n
 
     -- If we do have a pattern then the variable needs to be inserted
@@ -1467,7 +1467,7 @@ class EnsureNoLetStms a where
   ensureNoLetStms = traverse_ ensureNoLetStms
 
 instance EnsureNoLetStms C.Binder where
-  ensureNoLetStms arg@(C.Binder p _ _ n) =
+  ensureNoLetStms arg@(C.Binder p _ _ n _) =
     when (isJust p) $ typeError $ IllegalPatternInTelescope arg
 
 instance EnsureNoLetStms C.TypedBinding where
@@ -1515,7 +1515,7 @@ scopeCheckModule r e x qm tel checkDs = do
       -- (--auto-record-modules).  Private: the parameters themselves
       -- are not part of the module's public interface either.
       syns <- catMaybes <$> forM (telParamsWithTypes ctel)
-        (\ (n, ty) -> autoRecordModuleSynonym privateAccessInserted n ty)
+        (\ (synName, (varName, ty)) -> autoRecordModuleSynonymAliased varName synName privateAccessInserted ty)
       ds    <- checkDs
       scope <- getScope
       return (scope, A.Section r e (qm `withRangesOfQ` x) tel (syns ++ ds))
@@ -1837,7 +1837,7 @@ scopeCheckLetDef wh d = setCurrentRange d do
               typeError $ RepeatedVariablesInPattern ys
             bindVarsToBind
             p   <- toAbstract p
-            lets <- catMaybes <$> mapM (uncurry autoRecordLetSynonym) synAnns
+            lets <- catMaybes <$> mapM autoRecordSynonymAnn synAnns
             return $ A.LetPatBind (LetRange r) ai p rhs :| lets
         -- It's not a record pattern, so it should be a prefix left-hand side
         Left err ->
@@ -2835,23 +2835,31 @@ toAbstractNiceAxiom _ _ = __IMPOSSIBLE__
 --   shadowing resolves: @(module A : S) (module A : T)@ yields a single
 --   @module A = T A@ rather than a clashing pair.  ('C.Name' equality
 --   compares name parts, ignoring ranges, so the two @A@s are equal.)
-keepLastByName :: [(C.Name, C.Expr)] -> [(C.Name, C.Expr)]
+keepLastByName :: Eq k => [(k, a)] -> [(k, a)]
 keepLastByName [] = []
 keepLastByName (p@(n, _) : rest)
   | any ((n ==) . fst) rest = keepLastByName rest
   | otherwise               = p : keepLastByName rest
 
+-- | A synonym annotation keyed by synonym name.  The value @(varName, ty)@
+--   provides the bound variable name (self-application argument: @ty varName@)
+--   and the record type expression.  When there is no @as@ alias,
+--   @fst synEntry == varName@.
+type SynonymAnn = (C.Name, (C.Name, C.Expr))
+
 -- | The @module@-marked parameters of a concrete telescope, with their
 --   types.  Used to generate the requested module synonyms for binders.
---   Shadowed names are deduplicated (last wins, see 'keepLastByName').
-telParamsWithTypes :: C.Telescope -> [(C.Name, C.Expr)]
+--   Shadowed names are deduplicated (last wins, keyed by synonym name).
+telParamsWithTypes :: C.Telescope -> [SynonymAnn]
 telParamsWithTypes tel = keepLastByName
-  [ (C.boundName $ C.binderName b, ty)
+  [ (synName, (varName, ty))
   | C.TBind _ xs ty <- tel
   , Arg _ (Named _ b) <- List1.toList xs
   , isNothing (C.binderPattern b)
   , C.binderModuleSynonym b == SynonymBinder
-  , not $ isNoName $ C.boundName $ C.binderName b
+  , let varName = C.boundName $ C.binderName b
+  , not $ isNoName varName
+  , let synName = fromMaybe varName (C.binderSynonymAlias b)
   ]
 
 -- | The parameters of a record signature, flattened to one entry per
@@ -2961,12 +2969,13 @@ targetParts = \case
 --   and types are still available; the actual synonym 'A.LetBinding's
 --   are generated (via 'autoRecordLetSynonym') after 'toAbstract' has
 --   put the bound variables into scope.
-letPatSynonymAnns :: C.Pattern -> [(C.Name, C.Expr)]
+letPatSynonymAnns :: C.Pattern -> [SynonymAnn]
 letPatSynonymAnns = \case
   C.AnnP _ b ty
     | C.binderModuleSynonym b == SynonymBinder ->
-        (C.boundName $ C.binderName b, ty) :
-        maybe [] letPatSynonymAnns (C.binderPattern b)
+        let varName = C.boundName $ C.binderName b
+        in (fromMaybe varName (C.binderSynonymAlias b), (varName, ty)) :
+           maybe [] letPatSynonymAnns (C.binderPattern b)
     | otherwise -> maybe [] letPatSynonymAnns (C.binderPattern b)
   C.AsP _ _ p   -> letPatSynonymAnns p
   C.ParenP _ p  -> letPatSynonymAnns p
@@ -2981,10 +2990,30 @@ whenSynonym PlainBinder   _   = return Nothing
 autoRecordModuleSynonym :: Access -> C.Name -> C.Expr -> ScopeM (Maybe A.Declaration)
 autoRecordModuleSynonym = autoRecordModuleSynonym' Apply TopOpenModule WarnNoSynonym
 
+-- | Alias-aware variant of 'autoRecordModuleSynonym' for use with 'SynonymAnn'.
+autoRecordModuleSynonymAliased :: C.Name -> C.Name -> Access -> C.Expr -> ScopeM (Maybe A.Declaration)
+autoRecordModuleSynonymAliased varName synName p t = runMaybeT $ do
+  modapp <- synonymModApp WarnNoSynonym varName t
+  lift $ checkModuleMacro Apply TopOpenModule (getRange synName) p defaultErased synName
+           modapp DontOpen defaultImportDir
+
 -- | Variant of 'autoRecordModuleSynonym' for @let@-bound module
 --   synonyms (e.g. for typed lambda binders).
 autoRecordLetSynonym :: C.Name -> C.Expr -> ScopeM (Maybe A.LetBinding)
 autoRecordLetSynonym = autoRecordModuleSynonym' LetApply LetOpenModule WarnNoSynonym privateAccessInserted
+
+-- | Alias-aware variant: bound variable @varName@ (used as the self-application
+--   argument) and generated module @synName@ may differ.  When they are equal,
+--   equivalent to 'autoRecordLetSynonym'.
+autoRecordLetSynonymAliased :: C.Name -> C.Name -> C.Expr -> ScopeM (Maybe A.LetBinding)
+autoRecordLetSynonymAliased varName synName t = runMaybeT $ do
+  modapp <- synonymModApp WarnNoSynonym varName t
+  lift $ checkModuleMacro LetApply LetOpenModule (getRange synName) privateAccessInserted defaultErased synName
+           modapp DontOpen defaultImportDir
+
+-- | Apply 'autoRecordLetSynonymAliased' to a 'SynonymAnn' entry.
+autoRecordSynonymAnn :: SynonymAnn -> ScopeM (Maybe A.LetBinding)
+autoRecordSynonymAnn (synName, (varName, ty)) = autoRecordLetSynonymAliased varName synName ty
 
 -- | Quiet variants for synonyms that are re-generated from a
 --   declaration whose canonical occurrence already warns (e.g. the
@@ -3082,21 +3111,22 @@ synonymModApp warn x t = do
       -- synonyms there, in scope for the rest of the telescope (the
       -- same rule as for Pi types: f : ∀ {A : R} {x : A.fld} → R').
       -- Quiet: the original type already warned.
-      lets <- forMaybeM (telParamsWithTypes [tb]) \ (n, nty) ->
-        runMaybeT $ synonymTLet n nty
+      lets <- forMaybeM (telParamsWithTypes [tb]) \ (synName, (varName, nty)) ->
+        runMaybeT $ synonymTLet varName synName nty
       (tel, vss) <- nameDomains avoid' ds
       case xs' of
         b : bs -> return (C.TBind r (b :| bs) ty : lets ++ tel, vs ++ vss)
         []     -> __IMPOSSIBLE__
     nameDomains _ (Right C.TLet{} : _) = __IMPOSSIBLE__  -- excluded by plainTBind
 
-    -- A telescope entry @(let module n = R (n Δ))@ for a record-headed
-    -- binder @n@.
-    synonymTLet :: C.Name -> C.Expr -> MaybeT ScopeM C.TypedBinding
-    synonymTLet n nty = do
-      ma <- synonymModApp QuietNoSynonym n nty
-      return $ C.TLet (getRange n) $ singleton $
-        C.ModuleMacro (getRange n) defaultErased n ma DontOpen defaultImportDir
+    -- A telescope entry @(let module synName = R (varName Δ))@ for a
+    -- record-headed binder.  @varName@ is the bound variable (self-application);
+    -- @synName@ is the created module (same as @varName@ unless there is an alias).
+    synonymTLet :: C.Name -> C.Name -> C.Expr -> MaybeT ScopeM C.TypedBinding
+    synonymTLet varName synName nty = do
+      ma <- synonymModApp QuietNoSynonym varName nty
+      return $ C.TLet (getRange synName) $ singleton $
+        C.ModuleMacro (getRange synName) defaultErased synName ma DontOpen defaultImportDir
 
     nameBinders
       :: [C.Name] -> [NamedArg C.Binder]
@@ -3305,8 +3335,8 @@ instance ToAbstract GenTelSyn where
 telToAbstractWithSynonyms :: C.Telescope -> ScopeM [A.TypedBinding]
 telToAbstractWithSynonyms tel = fmap concat $ forM tel \ tb -> do
   mtb  <- toAbstract tb
-  syns <- forMaybeM (telParamsWithTypes [tb]) \ (n, ty) ->
-    fmap (A.TLet (getRange n) . singleton) <$> autoRecordLetSynonym n ty
+  syns <- forMaybeM (telParamsWithTypes [tb]) \ (synName, (varName, ty)) ->
+    fmap (A.TLet (getRange synName) . singleton) <$> autoRecordLetSynonymAliased varName synName ty
   return $ maybeToList mtb ++ syns
 
 instance ToAbstract GenTelAndType where
@@ -3819,18 +3849,19 @@ instance ToAbstract C.Clause where
 
 
 -- | All named type-ascribed pattern variables @(x : T)@ in a pattern.
-patternAscriptions :: C.Pattern -> [(C.Name, C.Expr)]
+patternAscriptions :: C.Pattern -> [SynonymAnn]
 patternAscriptions = foldrCPattern step
   where
     step (C.AnnP _ b ty) acc
-      | let x = C.boundName $ C.binderName b
-      , not (isNoName x)
-      , C.binderModuleSynonym b == SynonymBinder = (x, ty) : acc
+      | let varName = C.boundName $ C.binderName b
+      , not (isNoName varName)
+      , C.binderModuleSynonym b == SynonymBinder
+      = (fromMaybe varName (C.binderSynonymAlias b), (varName, ty)) : acc
     step _ acc = acc
 
 whereToAbstract
   :: Range                                       -- ^ The range of the @where@ block.
-  -> [(C.Name, C.Expr)]                          -- ^ Type-ascribed pattern variables of the clause.
+  -> [SynonymAnn]                                -- ^ Type-ascribed pattern variables of the clause.
   -> C.WhereClause                               -- ^ The @where@ block.
   -> ScopeM AbstractRHS                          -- ^ The scope-checking task to be run in the context of the @where@ module.
   -> ScopeM (AbstractRHS, A.WhereDeclarations)  -- ^ Additionally return the scope-checked contents of the @where@ module.
@@ -3850,7 +3881,7 @@ whereToAbstract r anns wh inner = do
           -- `A.LetBinding`s (abstract values) are returned outside the local
           -- scope and processed by the type-checker instead.
           (lets, result) <- localScope $ do
-            lets <- catMaybes <$> mapM (uncurry autoRecordLetSynonym) anns
+            lets <- catMaybes <$> mapM autoRecordSynonymAnn anns
             result <- inner
             return (lets, result)
           return (LetSynonymRHS lets result, A.noWhereDecls)
@@ -3881,7 +3912,7 @@ whereToAbstract1
   :: Range                                       -- ^ The range of the @where@-block.
   -> Erased                                      -- ^ Is the where module erased?
   -> Maybe (C.Name, Access)                      -- ^ The name of the @where@ module (if any).
-  -> [(C.Name, C.Expr)]                          -- ^ Type-ascribed pattern variables of the clause.
+  -> [SynonymAnn]                                -- ^ Type-ascribed pattern variables of the clause.
   -> [C.Declaration]                             -- ^ The contents of the @where@ module.
   -> ScopeM AbstractRHS                          -- ^ The scope-checking task to be run in the context of the @where@ module.
   -> ScopeM (AbstractRHS, A.WhereDeclarations)  -- ^ Additionally return the scope-checked contents of the @where@ module.
@@ -3903,7 +3934,7 @@ whereToAbstract1 r e whname anns whds inner = do
     -- pattern variables (--auto-record-modules).  Private, so that
     -- they do not leak from named (public) where modules.
     syns <- catMaybes <$> forM anns
-      (\ (x, ty) -> autoRecordModuleSynonym privateAccessInserted x ty)
+      (\ (synName, (varName, ty)) -> autoRecordModuleSynonymAliased varName synName privateAccessInserted ty)
     ds <- scopeCheckDeclarations whds
     return $ syns ++ ds
   setScope scope
@@ -3961,7 +3992,7 @@ checkNoTerminationPragma b ds =
       C.OverlapPragma _ _ _         -> []
 
 data RightHandSide = RightHandSide
-  { _rhsAnns       :: [(C.Name, C.Expr)]
+  { _rhsAnns       :: [SynonymAnn]
     -- ^ Type-ascribed pattern variables of the clause (for
     --   --auto-record-modules synonyms in the where module).
   , _rhsRewriteEqn :: [RewriteEqn' () A.BindName A.Pattern A.Expr]

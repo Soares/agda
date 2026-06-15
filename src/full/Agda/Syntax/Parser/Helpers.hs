@@ -202,7 +202,7 @@ mkQName ss | Just (ss0, ss1) <- initLast ss = do
 mkQName _ = __IMPOSSIBLE__ -- The lexer never gives us an empty list of parts
 
 mkDomainFree_ :: (NamedArg Binder -> NamedArg Binder) -> Maybe Pattern -> Name -> NamedArg Binder
-mkDomainFree_ f p n = f $ defaultNamedArg $ Binder p UserBinderName PlainBinder $ mkBoundName_ n
+mkDomainFree_ f p n = f $ defaultNamedArg $ Binder p UserBinderName PlainBinder (mkBoundName_ n) Nothing
 
 mkRString :: (Interval, String) -> RString
 mkRString (i, s) = Ranged (getRange i) s
@@ -396,7 +396,7 @@ boundNamesOrAbsurd es
         Nothing   -> parseError $ "expected sequence of bound identifiers"
         Just good -> fmap Left $ forM good $ \ (n, me) -> do
                        p <- traverse exprToPattern me
-                       return (defaultNamedArg (Binder p UserBinderName PlainBinder (mkBoundName_ n)))
+                       return (defaultNamedArg (Binder p UserBinderName PlainBinder (mkBoundName_ n) Nothing))
 
   where
 
@@ -548,10 +548,26 @@ exprToPattern e = case C.isPattern e of
 mkAscriptionExpr :: Range -> List1 Expr -> Expr -> Parser Expr
 mkAscriptionExpr = mkAscriptionExpr' PlainBinder
 
--- | @(module x : T)@: like 'mkAscriptionExpr' but marks each binder so that a
---   module synonym @module x = T x@ is generated for it. (Fork feature.)
+-- | @(module x : T)@ or @(x as alias : T)@: like 'mkAscriptionExpr' but marks
+--   each binder so that a module synonym @module x = T x@ is generated.
+--   When the application has exactly the form @x as alias@, binds variable @x@
+--   and generates @module alias = T x@ instead. (Fork feature.)
 mkModuleAscriptionExpr :: Range -> List1 Expr -> Expr -> Parser Expr
-mkModuleAscriptionExpr = mkAscriptionExpr' SynonymBinder
+mkModuleAscriptionExpr r es t =
+  case detectSynonymAlias (List1.toList es) of
+    Just (n, alias) ->
+      pure $ Ann r (Binder Nothing UserBinderName SynonymBinder (mkBoundName_ n) (Just alias)) t
+    Nothing -> mkAscriptionExpr' SynonymBinder r es t
+
+-- | Detect @[varExpr, \"as\", aliasExpr]@ in a module-ascription application list.
+detectSynonymAlias :: [Expr] -> Maybe (Name, Name)
+detectSynonymAlias [eVar, Ident (QName asId), eAlias]
+  | Name _ InScope (Id x :| []) <- asId
+  , rawNameToString x == "as"
+  , Just (n,     Nothing) <- exprAsNameAndPattern eVar
+  , Just (alias, Nothing) <- exprAsNameAndPattern eAlias
+  = Just (n, alias)
+detectSynonymAlias _ = Nothing
 
 mkAscriptionExpr' :: BinderModuleSynonym -> Range -> List1 Expr -> Expr -> Parser Expr
 mkAscriptionExpr' syn r es t = do
@@ -560,7 +576,7 @@ mkAscriptionExpr' syn r es t = do
       "Not a valid type-ascribed binder: " ++ prettyShow e
     Just (n, me) -> do
       p <- traverse exprToPattern me
-      pure $ Ann r (Binder p UserBinderName syn (mkBoundName_ n)) t
+      pure $ Ann r (Binder p UserBinderName syn (mkBoundName_ n) Nothing) t
   pure $ rawApp anns
 
 -- | Mark every binder of a typed binding @(x y : T)@ as requesting a module
@@ -668,18 +684,18 @@ patternSynArgs = mapM \ x -> do
   case x of
 
     -- Invariant: fixity is not used here, and neither finiteness
-    Arg _ (Named _ (Binder _ _ _ (BName _ fix _ fin)))
+    Arg _ (Named _ (Binder _ _ _ (BName _ fix _ fin) _))
       | not $ null fix -> __IMPOSSIBLE__
       | fin            -> __IMPOSSIBLE__
 
     -- Error cases:
-    Arg _ (Named _ (Binder (Just _) _ _ _)) ->
+    Arg _ (Named _ (Binder (Just _) _ _ _ _)) ->
       abort "Arguments to pattern synonyms cannot be patterns themselves"
-    Arg _ (Named _ (Binder _ _ _ (BName _ _ tac _))) | not (null tac) ->
+    Arg _ (Named _ (Binder _ _ _ (BName _ _ tac _) _)) | not (null tac) ->
       abort $ noAnn "Tactic"
 
     -- Benign case:
-    Arg ai (Named mn (Binder Nothing _ _ (BName n _ _ _)))
+    Arg ai (Named mn (Binder Nothing _ _ (BName n _ _ _) _))
       -- allow {n = n} for backwards compat with Agda 2.6
       | maybe True ((C.nameToRawName n ==) . rangedThing . woThing) mn ->
         case ai of

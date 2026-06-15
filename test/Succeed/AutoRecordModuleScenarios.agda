@@ -69,3 +69,9 @@ letPatSynonym : (m : Magma) → Magma.Carrier m → Magma.Carrier m
 letPatSynonym m x =
   let (B with Magma module) = m
   in x B.∘ x
+
+-- B8: optional `as Alias` alias in postfix synonym binder.
+-- `(inst as M with Magma module)` binds variable `inst` but creates
+-- module synonym `M` (so M.∘ is in scope, not inst.∘).
+aliasedSynonym : (inst as M with Magma module) → M.Carrier → M.Carrier
+aliasedSynonym (inst as M with Magma module) x = x M.∘ x
