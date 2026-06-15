@@ -33,7 +33,8 @@ import Agda.Syntax.Abstract.Views as A
 import qualified Agda.Syntax.Info as A
 import qualified Agda.Syntax.Concrete as C
 import Agda.Syntax.Concrete.Pretty () -- only Pretty instances
-import Agda.Syntax.Scope.Base (AbstractName, allNamesInScope, scopeModules, anameName)
+import Agda.Syntax.Abstract.Name (AbstractName, anameName)
+import Agda.Syntax.Scope.Base (allNamesInScope, scopeModules)
 import Agda.Syntax.Common
 import Agda.Syntax.Internal as I
 import Agda.Syntax.Position
@@ -1323,14 +1324,20 @@ checkPostfixMemberApp cmp e t x args = case args of
     -- type and to reuse the elaborated value (avoiding a second elaboration of
     -- the principal expression).
     (v0, pt) <- inferExpr (namedArg principal)
-    caseMaybeM (isRecordType pt) (typeError $ ShouldBeRecordType pt) $ \ (r, pars, _rdef) -> do
+    -- Strip any non-visible (implicit/instance) telescope from the principal's
+    -- type before the record-type check.  A principal of type
+    -- @{a : A} → R a@ is still valid: we generate metas for the implicit
+    -- args and apply v0 to them, yielding a value @v@ of the bare record type.
+    (vargs, pt') <- implicitArgs (-1) (not . visible) pt
+    let v = v0 `apply` vargs
+    caseMaybeM (isRecordType pt') (typeError $ ShouldBeRecordType pt) $ \ (r, pars, _rdef) -> do
       let m = qnameToMName r
       caseMaybeM (lookupRecordModuleMember m x) (typeError $ PostfixProjectionNotInRecordModule x r) $ \ q -> do
         -- @q@ lives in @r@'s record module, whose telescope is the record
         -- parameters followed by the record value ("self").  Apply @q@ to the
         -- parameters (from the principal's type) and the already-checked
         -- principal as self; for an actual field this builds the canonical
-        -- postfix projection @v0 .q@.  Then check the remaining arguments.
+        -- postfix projection @v .q@.  Then check the remaining arguments.
         def   <- getConstInfo q
         mproj <- isRelevantProjection q
         tel   <- lookupSection m
@@ -1347,7 +1354,7 @@ checkPostfixMemberApp cmp e t x args = case args of
             selfInfo            = case selfDoms of
               d : _ -> getArgInfo d
               []    -> defaultArgInfo
-            headArgs = parArgs ++ [Arg selfInfo v0]
+            headArgs = parArgs ++ [Arg selfInfo v]
             vhead    = case mproj of
               Just p  -> projDropParsApply p ProjPostfix rel headArgs
               Nothing -> Def q $ map Apply headArgs
