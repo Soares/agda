@@ -247,7 +247,9 @@ resolvePostfixCopats t (A.Clause lhs spats rhs wh catchall) = do
 
   goWithType :: Type -> A.LHSCore -> TCM (A.LHSCore, Type)
   goWithType ty = \case
-    core@(A.LHSHead _ _) -> return (core, ty)
+    core@(A.LHSHead _ _) -> do
+      retTy <- stripPis ty
+      return (core, retTy)
     A.LHSWith core wps ps -> do
       (core', retTy) <- goWithType ty core
       return (A.LHSWith core' wps ps, retTy)
@@ -260,6 +262,14 @@ resolvePostfixCopats t (A.Clause lhs spats rhs wh catchall) = do
       q <- resolveInRecord innerTy rawName
       retTy <- projectionReturnType q innerTy
       return (A.LHSProj (AmbQ (q :| [])) (setNamedArg h h') ps, retTy)
+
+  -- Strip all leading Pi binders to reach the eventual return type.
+  -- Used so that copatterns on multi-argument functions (f : A → B → R) resolve
+  -- the member name against R, regardless of whether arguments are given explicitly.
+  stripPis :: Type -> TCM Type
+  stripPis ty = reduce ty >>= \case
+    El _ (Pi _ b) -> stripPis (absBody b)
+    other         -> return other
 
   -- Look up a concrete name in the record module of the given type.
   resolveInRecord :: Type -> C.QName -> TCM QName

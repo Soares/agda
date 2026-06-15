@@ -101,3 +101,21 @@ record Baz : Set2 where
 
 copat : Baz
 copat .qux = Set
+
+-- Multi-argument copatterns: the function takes explicit args before the
+-- copattern, so the declared type is a Pi-headed type.  The resolver must
+-- strip Pi binders to reach the return record type before looking up the field.
+record Pair (A B : Set) : Set where
+  field fst : A
+  field snd : B
+
+mkPair : (A B : Set) → A → B → Pair A B
+mkPair _ _ a b .fst = a
+mkPair _ _ a b .snd = b
+
+-- Same with an implicit parameter: resolver must strip the implicit Pi too.
+record Wrap (A : Set) : Set where
+  field wrapped : A
+
+wrapUp : {A : Set} → A → Wrap A
+wrapUp {A} a .wrapped = a
