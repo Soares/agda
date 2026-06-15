@@ -255,12 +255,12 @@ resolvePostfixCopats t (A.Clause lhs spats rhs wh catchall) = do
       return (A.LHSWith core' wps ps, retTy)
     A.LHSProj d h ps -> do
       (h', innerTy) <- goWithType ty (namedArg h)
-      retTy <- projectionReturnType (A.headAmbQ d) innerTy
+      retTy <- stripPis =<< projectionReturnType (A.headAmbQ d) innerTy
       return (A.LHSProj d (setNamedArg h h') ps, retTy)
     A.LHSPostfixProj patInfo rawName h ps -> do
       (h', innerTy) <- goWithType ty (namedArg h)
       q <- resolveInRecord innerTy rawName
-      retTy <- projectionReturnType q innerTy
+      retTy <- stripPis =<< projectionReturnType q innerTy
       return (A.LHSProj (AmbQ (q :| [])) (setNamedArg h h') ps, retTy)
 
   -- Strip all leading Pi binders to reach the eventual return type.

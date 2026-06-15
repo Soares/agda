@@ -119,3 +119,16 @@ record Wrap (A : Set) : Set where
 
 wrapUp : {A : Set} → A → Wrap A
 wrapUp {A} a .wrapped = a
+
+-- Projection taking arguments, followed by another projection
+record Nested : Set where
+  field
+    getN : N
+
+record Outer : Set where
+  field
+    getNested : N → Nested
+
+testNestedCopat : Outer
+testNestedCopat .getNested n .getN = n
+
