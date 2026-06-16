@@ -486,7 +486,18 @@ stripWithClausePatterns cxtNames parent f t delta qs npars perm ps = do
                 ps <- insertImplicitPatternsT ExpandLast ps t1
                 return (self1, t1, ps)
               strip self1 t1 ps qs
-          Nothing -> mismatch
+          Nothing
+            -- A PostfixProjP (from --postfix-methods) carries the raw concrete
+            -- field name and is resolved type-directedly by splitRest in LHS.hs.
+            -- The parent clause already accepted it, so we trust it matches d.
+            | A.PostfixProjP{} <- namedArg p -> do
+              (self1, t1, ps) <- liftTCM $ do
+                t <- reduce t
+                (_, self1, t1) <- fromMaybe __IMPOSSIBLE__ <$> projectTyped self t o d
+                ps <- insertImplicitPatternsT ExpandLast ps t1
+                return (self1, t1, ps)
+              strip self1 t1 ps qs
+            | otherwise -> mismatch
 
         -- We can safely strip dots from variables. The unifier will put them back when required.
         VarP _ x | A.DotP _ u <- namedArg p
