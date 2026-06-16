@@ -3773,12 +3773,12 @@ instance ToAbstract CLHSCore where
         where
         isDotProjPat :: NamedArg C.Pattern -> Bool
         isDotProjPat p = case namedArg p of
-          C.DotP _ _ (C.Ident n) -> isJust (C.isUnqualified n)
-          _                      -> False
+          C.DotP _ _ C.CouldBeProjectionPattern (C.Ident n) -> isJust (C.isUnqualified n)
+          _                        -> False
         buildSegs :: [NamedArg C.Pattern] -> [(C.QName, [NamedArg C.Pattern])]
         buildSegs [] = []
         buildSegs (p : rest) =
-          let C.DotP _ _ (C.Ident n) = namedArg p
+          let C.DotP _ _ _ (C.Ident n) = namedArg p
               (args, rest') = break isDotProjPat rest
           in (n, args) : buildSegs rest'
 
