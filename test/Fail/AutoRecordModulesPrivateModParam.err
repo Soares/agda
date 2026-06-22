@@ -2,7 +2,5 @@ AutoRecordModulesPrivateModParam.agda:20.8-27: error: [NotInScope]
 Not in scope:
   WithParam.X.Carrier
   at AutoRecordModulesPrivateModParam.agda:20.8-27
-    (did you mean
-       'M.Carrier' or
-       'Magma.Carrier'?)
+    (did you mean 'Magma.Carrier'?)
 when scope checking WithParam.X.Carrier

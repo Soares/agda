@@ -9,3 +9,17 @@ No module synonym was generated for irrM, because the field is
 irrelevant or erased
 when scope checking the declaration
   .module irrM : Magma
+
+———— All done; warnings encountered ————————————————————————
+
+AutoRecordModules.agda:107.8-14: warning: -W[no]NoRecordModuleSynonym
+No module synonym was generated for viaIrr, because its type has a
+domain this feature does not understand
+when scope checking the declaration
+  module viaIrr : .Magma → Magma
+
+AutoRecordModules.agda:275.13-17: warning: -W[no]NoRecordModuleSynonym
+No module synonym was generated for irrM, because the field is
+irrelevant or erased
+when scope checking the declaration
+  .module irrM : Magma
