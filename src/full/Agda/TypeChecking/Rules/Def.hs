@@ -234,10 +234,19 @@ checkAlias t ai i name e mc =
 --   name in the record module of the target type and replace the deferred node
 --   with a proper 'A.LHSProj'.
 resolvePostfixCopats :: Type -> A.Clause -> TCM A.Clause
+resolvePostfixCopats t clause@(A.Clause (A.LHS _ core) _ _ _ _)
+  | not (hasPostfixProj core) = return clause
 resolvePostfixCopats t (A.Clause lhs spats rhs wh catchall) = do
   lhs' <- resolveLHS lhs
   return $ A.Clause lhs' spats rhs wh catchall
   where
+  hasPostfixProj :: A.LHSCore -> Bool
+  hasPostfixProj = \case
+    A.LHSHead{}              -> False
+    A.LHSWith c _ _          -> hasPostfixProj c
+    A.LHSProj _ h _          -> hasPostfixProj (namedArg h)
+    A.LHSPostfixProj{}       -> True
+
   resolveLHS (A.LHS i core) = A.LHS i <$> go t core
 
   -- Walk the LHSCore inside-out, threading the current target type.
